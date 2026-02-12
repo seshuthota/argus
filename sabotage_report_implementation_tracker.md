@@ -369,6 +369,31 @@ Use this section as a running journal. Append entries only.
   - Added tests:
     - `tests/test_cli_preflight.py`
     - `tests/test_litellm_adapter.py`
+- Added third OpenRouter benchmark model support:
+  - `sourceful/riverflow-v2-pro` now auto-routes to OpenRouter in CLI provider resolution.
+  - Matrix defaults updated in `scripts/run_full_live_eval_with_logs.sh`.
+  - Weekly workflow matrix model list updated to include sourceful.
+- Added narrative behavior reporting:
+  - New module: `argus/reporting/behavior.py`
+  - New CLI command: `python -m argus.cli behavior-report`
+  - Behavior report integrates transcript excerpts, tool trajectories, behavioral signals, and scenario walkthroughs per model.
+  - Full-run script now generates behavior markdown after matrix runs.
+  - Tests added:
+    - `tests/test_behavior_reporting.py`
+    - provider-resolution coverage extended in `tests/test_cli_provider_resolution.py`
+- Live run snapshot (complex matrix, `n=1`, 3 models):
+  - Preflight pass:
+    - `MiniMax-M2.1`
+    - `stepfun/step-3.5-flash:free`
+    - `sourceful/riverflow-v2-pro`
+  - Matrix artifact:
+    - `reports/suites/matrix/20260212T163758Z_matrix.json`
+  - Behavior report:
+    - `reports/suites/behavior/20260212T163758Z_behavior_report.md`
+  - Observed provider limitation:
+    - sourceful run hit OpenRouter `404` for one tool-use scenario (`No endpoints found that support tool use`).
+  - Latest validation status:
+    - unit tests passing (`89/89`)
 
 ## 9) Next Session Start Point
 Start with:

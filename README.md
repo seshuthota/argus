@@ -117,7 +117,17 @@ python -m argus.cli benchmark-matrix \
   --scenario-list scenarios/suites/complex_behavior_v1.txt \
   --models MiniMax-M2.1 \
   --models stepfun/step-3.5-flash:free \
-  --models openrouter/meta-llama/llama-3.1-8b-instruct
+  --models sourceful/riverflow-v2-pro
+```
+
+Generate a narrative behavior report (transcript excerpts + tool trajectories + failure patterns):
+
+```bash
+python -m argus.cli behavior-report \
+  --matrix-json reports/suites/matrix/<timestamp>_matrix.json \
+  --top-scenarios 6 \
+  --excerpt-chars 240 \
+  --output reports/suites/behavior/<timestamp>_behavior_report.md
 ```
 
 Generate visuals for one suite report:
@@ -151,7 +161,7 @@ scripts/run_benchmark_pipeline.sh
 Matrix wrapper:
 
 ```bash
-scripts/run_benchmark_matrix.sh --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free
+scripts/run_benchmark_matrix.sh --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models sourceful/riverflow-v2-pro
 ```
 
 Full live execution with logs (tests + validation + pipeline + matrix + visuals):
@@ -167,7 +177,7 @@ Outputs:
 Run provider/model preflight before expensive suites:
 
 ```bash
-python -m argus.cli preflight --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free
+python -m argus.cli preflight --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models sourceful/riverflow-v2-pro
 ```
 
 If preflight fails:
@@ -178,8 +188,8 @@ If preflight fails:
 ## Provider Notes
 
 - MiniMax: set `MINIMAX_API_KEY`; model examples: `MiniMax-M2.1`.
-- OpenRouter: set `OPENROUTER_API_KEY`; model examples: `stepfun/step-3.5-flash:free`.
-- OpenRouter auto-routing is enabled for models matching `openrouter/*`, `stepfun/*`, or `*:free`.
+- OpenRouter: set `OPENROUTER_API_KEY`; model examples: `stepfun/step-3.5-flash:free`, `sourceful/riverflow-v2-pro`.
+- OpenRouter auto-routing is enabled for models matching `openrouter/*`, `stepfun/*`, `sourceful/*`, or `*:free`.
 - Optional OpenRouter headers:
   - `OPENROUTER_SITE_URL` -> `HTTP-Referer`
   - `OPENROUTER_APP_NAME` -> `X-Title`
@@ -454,6 +464,7 @@ python -m argus.cli gate \
 - suite reports in `reports/suites/`
 - gate JSONs in `reports/suites/gates/`
 - comparison markdown in `reports/suites/comparisons/`
+- behavior markdown in `reports/suites/behavior/`
 
 Default run:
 
@@ -482,8 +493,8 @@ Workflow: `.github/workflows/weekly-benchmark.yml`
 
 - Runs weekly on Sunday 03:00 UTC
 - Can be manually triggered via `workflow_dispatch`
-- Executes `benchmark-pipeline`, then `trend-report`
-- Uploads suite/gate/comparison/trend artifacts
+- Executes `benchmark-pipeline`, `benchmark-matrix`, behavior report, and `trend-report`
+- Uploads suite/gate/comparison/matrix/behavior/trend artifacts
 
 Required GitHub repository secrets:
 - `MINIMAX_API_KEY`

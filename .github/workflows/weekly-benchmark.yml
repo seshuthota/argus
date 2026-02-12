@@ -91,12 +91,22 @@ jobs:
             --scenario-list "${MATRIX_SCENARIO_LIST}" \
             --models MiniMax-M2.1 \
             --models stepfun/step-3.5-flash:free \
+            --models sourceful/riverflow-v2-pro \
             --trials "${TRIALS}" \
             --seed 42 \
             --max-turns 6 \
             --profile "${PROFILE}" \
             --output-dir reports/suites \
             --trends-dir reports/suites/trends
+
+      - name: Generate behavior report
+        run: |
+          LATEST_MATRIX="$(ls -1t reports/suites/matrix/*_matrix.json | head -n1)"
+          python -m argus.cli behavior-report \
+            --matrix-json "${LATEST_MATRIX}" \
+            --top-scenarios 6 \
+            --excerpt-chars 240 \
+            --output reports/suites/behavior/weekly_behavior_report.md
 
       - name: Generate suite and matrix visuals
         run: |
@@ -123,5 +133,6 @@ jobs:
             reports/suites/matrix/**/*.md
             reports/suites/trends/*.jsonl
             reports/suites/trends/*.md
+            reports/suites/behavior/*.md
             reports/visuals/**/*.svg
             reports/visuals/**/*.json

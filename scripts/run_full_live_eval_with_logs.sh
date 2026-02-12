@@ -14,7 +14,7 @@ set -u
 #   ARGUS_PROFILE=candidate
 #   ARGUS_MODEL_A=MiniMax-M2.1
 #   ARGUS_MODEL_B=stepfun/step-3.5-flash:free
-#   ARGUS_MATRIX_MODELS="MiniMax-M2.1,stepfun/step-3.5-flash:free"
+#   ARGUS_MATRIX_MODELS="MiniMax-M2.1,stepfun/step-3.5-flash:free,sourceful/riverflow-v2-pro"
 #   ARGUS_PIPELINE_SCENARIO_LIST=scenarios/suites/sabotage_extended_v1.txt
 #   ARGUS_MATRIX_SCENARIO_LIST=scenarios/suites/complex_behavior_v1.txt
 #   ARGUS_TREND_WINDOW=12
@@ -34,7 +34,8 @@ SEED="${ARGUS_SEED:-42}"
 PROFILE="${ARGUS_PROFILE:-candidate}"
 MODEL_A="${ARGUS_MODEL_A:-MiniMax-M2.1}"
 MODEL_B="${ARGUS_MODEL_B:-stepfun/step-3.5-flash:free}"
-MATRIX_MODELS="${ARGUS_MATRIX_MODELS:-$MODEL_A,$MODEL_B}"
+MODEL_C="${ARGUS_MODEL_C:-sourceful/riverflow-v2-pro}"
+MATRIX_MODELS="${ARGUS_MATRIX_MODELS:-$MODEL_A,$MODEL_B,$MODEL_C}"
 PIPELINE_SCENARIO_LIST="${ARGUS_PIPELINE_SCENARIO_LIST:-scenarios/suites/sabotage_extended_v1.txt}"
 MATRIX_SCENARIO_LIST="${ARGUS_MATRIX_SCENARIO_LIST:-scenarios/suites/complex_behavior_v1.txt}"
 TREND_WINDOW="${ARGUS_TREND_WINDOW:-12}"
@@ -60,6 +61,7 @@ echo "- Seed: \`$SEED\`" >>"$SUMMARY"
 echo "- Profile: \`$PROFILE\`" >>"$SUMMARY"
 echo "- Model A: \`$MODEL_A\`" >>"$SUMMARY"
 echo "- Model B: \`$MODEL_B\`" >>"$SUMMARY"
+echo "- Model C (matrix default): \`$MODEL_C\`" >>"$SUMMARY"
 echo "- Matrix models: \`$MATRIX_MODELS\`" >>"$SUMMARY"
 echo "- Pipeline scenarios: \`$PIPELINE_SCENARIO_LIST\`" >>"$SUMMARY"
 echo "- Matrix scenarios: \`$MATRIX_SCENARIO_LIST\`" >>"$SUMMARY"
@@ -162,6 +164,22 @@ run_step "40_benchmark_matrix" \
     --output-dir reports/suites \
     --trends-dir reports/suites/trends
 
+# 5.5) Narrative behavior report from latest matrix
+run_step "45_behavior_report" bash -lc "
+  set -e
+  latest_matrix=\$(ls -1t reports/suites/matrix/*_matrix.json 2>/dev/null | head -n1 || true)
+  if [[ -z \"\$latest_matrix\" ]]; then
+    echo 'no_matrix_json_found'
+    exit 0
+  fi
+  echo \"latest_matrix=\$latest_matrix\"
+  $PY -m argus.cli behavior-report \
+    --matrix-json \"\$latest_matrix\" \
+    --top-scenarios 6 \
+    --excerpt-chars 240 \
+    --output \"reports/suites/behavior/behavior_report_$STAMP.md\"
+"
+
 # 6) Trend markdown
 run_step "50_trend_report" \
   "$PY" -m argus.cli trend-report \
@@ -220,6 +238,8 @@ echo "" >>"$SUMMARY"
   find reports/suites/matrix -type f -newer "$START_MARKER" 2>/dev/null | sort | sed 's/^/  - /'
   echo "- New trend artifacts:"
   find reports/suites/trends -maxdepth 1 -type f -newer "$START_MARKER" 2>/dev/null | sort | sed 's/^/  - /'
+  echo "- New behavior reports:"
+  find reports/suites/behavior -maxdepth 1 -type f -newer "$START_MARKER" 2>/dev/null | sort | sed 's/^/  - /'
   echo "- New visual artifacts:"
   find reports/visuals -type f -newer "$START_MARKER" 2>/dev/null | sort | sed 's/^/  - /'
 } >>"$SUMMARY"

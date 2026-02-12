@@ -44,6 +44,7 @@ from .reporting.gate_profiles import GATE_PROFILES
 from .reporting.comparison import build_suite_comparison_markdown
 from .reporting.trends import load_trend_entries, build_trend_markdown
 from .reporting.paired import build_paired_analysis, build_paired_markdown
+from .reporting.behavior import build_behavior_report_markdown
 from .reporting.visualize import (
     generate_suite_visuals,
     generate_matrix_visuals,
@@ -82,6 +83,7 @@ def _resolve_model_and_adapter(
         model_lower.startswith("openrouter/")
         or model_lower.endswith(":free")
         or model_lower.startswith("stepfun/")
+        or model_lower.startswith("sourceful/")
     )
 
     if not resolved_key:
@@ -1698,6 +1700,110 @@ def gate(
     sys.exit(1)
 
 
+@cli.command("behavior-report")
+@click.option(
+    "--suite-report",
+    "suite_report_paths",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="One or more suite report JSON paths.",
+)
+@click.option(
+    "--matrix-json",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Optional matrix JSON path from benchmark-matrix to auto-load suite reports.",
+)
+@click.option("--top-scenarios", default=6, type=int, show_default=True, help="Scenario walkthrough count per model.")
+@click.option("--excerpt-chars", default=220, type=int, show_default=True, help="Max chars per transcript excerpt.")
+@click.option(
+    "--output",
+    default=None,
+    help="Output markdown path. Defaults to reports/suites/behavior/<timestamp>_behavior_report.md",
+)
+def behavior_report(
+    suite_report_paths: tuple[str, ...],
+    matrix_json: str | None,
+    top_scenarios: int,
+    excerpt_chars: int,
+    output: str | None,
+):
+    """Generate a narrative behavior report from suite or matrix artifacts."""
+    if top_scenarios < 1:
+        console.print("[red]✗ --top-scenarios must be >= 1[/red]")
+        sys.exit(1)
+    if excerpt_chars < 80:
+        console.print("[red]✗ --excerpt-chars must be >= 80[/red]")
+        sys.exit(1)
+    if not suite_report_paths and not matrix_json:
+        console.print("[red]✗ Provide at least one --suite-report or --matrix-json[/red]")
+        sys.exit(1)
+
+    resolved_suite_paths: list[Path] = []
+    seen: set[str] = set()
+
+    for path in suite_report_paths:
+        p = Path(path)
+        key = str(p.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved_suite_paths.append(p)
+
+    if matrix_json:
+        with open(matrix_json) as f:
+            matrix_payload = json.load(f)
+        rows = matrix_payload.get("models", []) or []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            suite_path = row.get("suite_path")
+            if not isinstance(suite_path, str) or not suite_path.strip():
+                continue
+            p = Path(suite_path)
+            if not p.exists():
+                p = Path.cwd() / p
+            if not p.exists():
+                continue
+            key = str(p.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            resolved_suite_paths.append(p)
+
+    if not resolved_suite_paths:
+        console.print("[red]✗ No readable suite reports resolved[/red]")
+        sys.exit(1)
+
+    suite_reports: list[dict[str, Any]] = []
+    for path in resolved_suite_paths:
+        with open(path) as f:
+            payload = json.load(f)
+        if not isinstance(payload, dict):
+            continue
+        suite_reports.append(payload)
+
+    if not suite_reports:
+        console.print("[red]✗ Failed to load suite report payloads[/red]")
+        sys.exit(1)
+
+    markdown = build_behavior_report_markdown(
+        suite_reports,
+        top_scenarios=top_scenarios,
+        excerpt_chars=excerpt_chars,
+    )
+
+    if output:
+        out = Path(output)
+    else:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        out = Path("reports/suites/behavior") / f"{ts}_behavior_report.md"
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(markdown)
+    console.print(f"[green]✓[/green] Behavior report saved: {out}")
+
+
 @cli.command("trend-report")
 @click.option(
     "--trend-dir",
@@ -2123,7 +2229,10 @@ def benchmark_pipeline(
     "--models",
     multiple=True,
     required=True,
-    help="Repeat --models for each model (minimum 2). Example: --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free",
+    help=(
+        "Repeat --models for each model (minimum 2). "
+        "Example: --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models sourceful/riverflow-v2-pro"
+    ),
 )
 @click.option("--trials", "-n", default=2, type=int, help="Trials per scenario (default: 2)")
 @click.option("--temperature", "-t", default=0.0, help="Temperature (default: 0.0)")
