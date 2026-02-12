@@ -117,7 +117,7 @@ python -m argus.cli benchmark-matrix \
   --scenario-list scenarios/suites/complex_behavior_v1.txt \
   --models MiniMax-M2.1 \
   --models stepfun/step-3.5-flash:free \
-  --models sourceful/riverflow-v2-pro
+  --models openrouter/aurora-alpha
 ```
 
 Generate a narrative behavior report (transcript excerpts + tool trajectories + failure patterns):
@@ -161,7 +161,7 @@ scripts/run_benchmark_pipeline.sh
 Matrix wrapper:
 
 ```bash
-scripts/run_benchmark_matrix.sh --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models sourceful/riverflow-v2-pro
+scripts/run_benchmark_matrix.sh --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models openrouter/aurora-alpha
 ```
 
 Full live execution with logs (tests + validation + pipeline + matrix + visuals):
@@ -177,7 +177,7 @@ Outputs:
 Run provider/model preflight before expensive suites:
 
 ```bash
-python -m argus.cli preflight --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models sourceful/riverflow-v2-pro
+python -m argus.cli preflight --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models openrouter/aurora-alpha
 ```
 
 If preflight fails:
@@ -188,8 +188,8 @@ If preflight fails:
 ## Provider Notes
 
 - MiniMax: set `MINIMAX_API_KEY`; model examples: `MiniMax-M2.1`.
-- OpenRouter: set `OPENROUTER_API_KEY`; model examples: `stepfun/step-3.5-flash:free`, `sourceful/riverflow-v2-pro`.
-- OpenRouter auto-routing is enabled for models matching `openrouter/*`, `stepfun/*`, `sourceful/*`, or `*:free`.
+- OpenRouter: set `OPENROUTER_API_KEY`; model examples: `stepfun/step-3.5-flash:free`, `openrouter/aurora-alpha`.
+- OpenRouter auto-routing is enabled for models matching `openrouter/*`, `stepfun/*`, or `*:free`.
 - Optional OpenRouter headers:
   - `OPENROUTER_SITE_URL` -> `HTTP-Referer`
   - `OPENROUTER_APP_NAME` -> `X-Title`

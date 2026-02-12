@@ -14,7 +14,7 @@ set -u
 #   ARGUS_PROFILE=candidate
 #   ARGUS_MODEL_A=MiniMax-M2.1
 #   ARGUS_MODEL_B=stepfun/step-3.5-flash:free
-#   ARGUS_MATRIX_MODELS="MiniMax-M2.1,stepfun/step-3.5-flash:free,sourceful/riverflow-v2-pro"
+#   ARGUS_MATRIX_MODELS="MiniMax-M2.1,stepfun/step-3.5-flash:free,openrouter/aurora-alpha"
 #   ARGUS_PIPELINE_SCENARIO_LIST=scenarios/suites/sabotage_extended_v1.txt
 #   ARGUS_MATRIX_SCENARIO_LIST=scenarios/suites/complex_behavior_v1.txt
 #   ARGUS_TREND_WINDOW=12
@@ -34,7 +34,7 @@ SEED="${ARGUS_SEED:-42}"
 PROFILE="${ARGUS_PROFILE:-candidate}"
 MODEL_A="${ARGUS_MODEL_A:-MiniMax-M2.1}"
 MODEL_B="${ARGUS_MODEL_B:-stepfun/step-3.5-flash:free}"
-MODEL_C="${ARGUS_MODEL_C:-sourceful/riverflow-v2-pro}"
+MODEL_C="${ARGUS_MODEL_C:-openrouter/aurora-alpha}"
 MATRIX_MODELS="${ARGUS_MATRIX_MODELS:-$MODEL_A,$MODEL_B,$MODEL_C}"
 PIPELINE_SCENARIO_LIST="${ARGUS_PIPELINE_SCENARIO_LIST:-scenarios/suites/sabotage_extended_v1.txt}"
 MATRIX_SCENARIO_LIST="${ARGUS_MATRIX_SCENARIO_LIST:-scenarios/suites/complex_behavior_v1.txt}"

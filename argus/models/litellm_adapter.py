@@ -91,8 +91,14 @@ class LiteLLMAdapter:
     ) -> ModelResponse:
         """Execute a turn via LiteLLM."""
 
+        model_name = settings.model
+        # OpenRouter-owned top-level aliases (e.g., aurora-alpha) need an extra
+        # namespace segment with LiteLLM to preserve full model id at provider.
+        if model_name == "openrouter/aurora-alpha":
+            model_name = "openrouter/openrouter/aurora-alpha"
+
         kwargs: dict[str, Any] = {
-            "model": settings.model,
+            "model": model_name,
             "messages": messages,
             "temperature": settings.temperature,
             "max_tokens": settings.max_tokens,

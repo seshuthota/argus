@@ -83,7 +83,6 @@ def _resolve_model_and_adapter(
         model_lower.startswith("openrouter/")
         or model_lower.endswith(":free")
         or model_lower.startswith("stepfun/")
-        or model_lower.startswith("sourceful/")
     )
 
     if not resolved_key:
@@ -2231,7 +2230,7 @@ def benchmark_pipeline(
     required=True,
     help=(
         "Repeat --models for each model (minimum 2). "
-        "Example: --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models sourceful/riverflow-v2-pro"
+        "Example: --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models openrouter/aurora-alpha"
     ),
 )
 @click.option("--trials", "-n", default=2, type=int, help="Trials per scenario (default: 2)")

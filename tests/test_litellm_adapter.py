@@ -91,6 +91,24 @@ class LiteLLMAdapterRetryTests(unittest.TestCase):
         self.assertEqual(completion_mock.call_count, 3)
         self.assertEqual(sleep_mock.call_count, 2)
 
+    def test_openrouter_aurora_model_is_normalized_for_litellm(self) -> None:
+        adapter = LiteLLMAdapter(
+            api_key="test",
+            api_base="https://openrouter.ai/api/v1",
+            max_retries=0,
+        )
+        settings = ModelSettings(model="openrouter/aurora-alpha", temperature=0.0, max_tokens=32, seed=1)
+
+        with patch(
+            "argus.models.litellm_adapter.litellm.completion",
+            return_value=_fake_completion_response("ok"),
+        ) as completion_mock:
+            response = adapter.execute_turn(messages=[{"role": "user", "content": "hello"}], tools=None, settings=settings)
+
+        self.assertEqual(response.content, "ok")
+        kwargs = completion_mock.call_args.kwargs
+        self.assertEqual(kwargs["model"], "openrouter/openrouter/aurora-alpha")
+
 
 if __name__ == "__main__":
     unittest.main()

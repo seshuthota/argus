@@ -91,7 +91,7 @@ jobs:
             --scenario-list "${MATRIX_SCENARIO_LIST}" \
             --models MiniMax-M2.1 \
             --models stepfun/step-3.5-flash:free \
-            --models sourceful/riverflow-v2-pro \
+            --models openrouter/aurora-alpha \
             --trials "${TRIALS}" \
             --seed 42 \
             --max-turns 6 \

@@ -18,7 +18,7 @@ def _write_sample_run(path: Path, *, forbidden: bool = False) -> None:
         "scorecard": {
             "run_id": "run_1",
             "scenario_id": "SCENARIO_A",
-            "model": "openrouter/sourceful/riverflow-v2-pro",
+            "model": "openrouter/aurora-alpha",
             "outcome": {"task_success": 3, "harm_or_risk": 0, "constraint_violations": 0},
             "process": {"permission_discipline": 4, "tool_hygiene": 4},
             "total_severity": 0,
@@ -30,7 +30,7 @@ def _write_sample_run(path: Path, *, forbidden: bool = False) -> None:
             "run_id": "run_1",
             "scenario_id": "SCENARIO_A",
             "scenario_version": "1.0.0",
-            "model": "openrouter/sourceful/riverflow-v2-pro",
+            "model": "openrouter/aurora-alpha",
             "settings": {},
             "duration_seconds": 1.2,
             "transcript": [
@@ -58,7 +58,7 @@ class BehaviorReportingTests(unittest.TestCase):
 
             suite = {
                 "suite_id": "suite_abc",
-                "model": "openrouter/sourceful/riverflow-v2-pro",
+                "model": "openrouter/aurora-alpha",
                 "summary": {
                     "executed_runs": 1,
                     "pass_rate": 1.0,
@@ -109,7 +109,7 @@ class BehaviorReportingTests(unittest.TestCase):
             _write_sample_run(run_path, forbidden=False)
             suite_payload = {
                 "suite_id": "suite_abc",
-                "model": "openrouter/sourceful/riverflow-v2-pro",
+                "model": "openrouter/aurora-alpha",
                 "summary": {
                     "executed_runs": 1,
                     "pass_rate": 1.0,
@@ -171,7 +171,7 @@ class BehaviorReportingTests(unittest.TestCase):
             _write_sample_run(run_path, forbidden=False)
             suite_payload = {
                 "suite_id": "suite_abc",
-                "model": "openrouter/sourceful/riverflow-v2-pro",
+                "model": "openrouter/aurora-alpha",
                 "summary": {"executed_runs": 1, "pass_rate": 1.0, "avg_total_severity": 0.0, "cross_trial_anomaly_count": 0},
                 "top_failed_checks": [],
                 "by_scenario": {
@@ -199,7 +199,7 @@ class BehaviorReportingTests(unittest.TestCase):
                 json.dumps(
                     {
                         "models": [
-                            {"resolved_model": "openrouter/sourceful/riverflow-v2-pro", "suite_path": str(suite_path)},
+                            {"resolved_model": "openrouter/aurora-alpha", "suite_path": str(suite_path)},
                         ]
                     }
                 )

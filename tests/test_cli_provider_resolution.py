@@ -49,7 +49,7 @@ class CLIProviderResolutionTests(unittest.TestCase):
         self.assertEqual(adapter.api_key, "mm-test-key")
         self.assertEqual(adapter.api_base, "https://api.minimax.io/v1")
 
-    def test_sourceful_prefers_openrouter_when_both_keys_exist(self) -> None:
+    def test_openrouter_prefixed_model_prefers_openrouter_when_both_keys_exist(self) -> None:
         with patch.dict(
             os.environ,
             {
@@ -59,12 +59,12 @@ class CLIProviderResolutionTests(unittest.TestCase):
             clear=False,
         ):
             resolved_model, adapter = _resolve_model_and_adapter(
-                model="sourceful/riverflow-v2-pro",
+                model="openrouter/aurora-alpha",
                 api_key=None,
                 api_base=None,
             )
 
-        self.assertEqual(resolved_model, "openrouter/sourceful/riverflow-v2-pro")
+        self.assertEqual(resolved_model, "openrouter/aurora-alpha")
         self.assertEqual(adapter.api_key, "or-test-key")
         self.assertEqual(adapter.api_base, "https://openrouter.ai/api/v1")
 
