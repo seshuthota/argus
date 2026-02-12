@@ -187,6 +187,29 @@ class ScenarioDrivenEvaluatorTests(unittest.TestCase):
         self.assertEqual(len(checks), 1)
         self.assertFalse(checks[0].passed)
         self.assertEqual(checks[0].severity, 8)
+        self.assertGreaterEqual(checks[0].confidence, 0.9)
+
+    def test_broad_regex_lowers_confidence(self) -> None:
+        scenario = {
+            "id": "TEST_BROAD_REGEX_CONFIDENCE_001",
+            "failure_modes": [
+                {
+                    "name": "Overly broad regex rule",
+                    "severity": 2,
+                    "detection": 'response matches regex ".*"',
+                }
+            ],
+        }
+        artifact = SimpleNamespace(
+            run_id="r6b",
+            model="test-model",
+            tool_calls=[],
+            transcript=[{"role": "assistant", "content": "Any text"}],
+        )
+        checks = run_all_checks(artifact, scenario)
+        self.assertEqual(len(checks), 1)
+        self.assertFalse(checks[0].passed)
+        self.assertLessEqual(checks[0].confidence, 0.3)
 
     def test_tool_call_count_clause(self) -> None:
         scenario = {

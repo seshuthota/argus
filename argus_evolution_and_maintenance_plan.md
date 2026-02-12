@@ -71,8 +71,8 @@
 *Goal: Quantify evaluation reliability.*
 
 ### 4.1 Detection Confidence Scoring
-- **Task:** Refine the `confidence` metadata in `CheckResult`.
-- **Logic:** Lower confidence if a regex is extremely broad or if multiple `unsupported_clauses` are detected in a single run.
+- **Task:** Refine the `confidence` metadata in `CheckResult`. [Implemented (v1 heuristic)]
+- **Logic:** v1 lowers confidence for broad regex patterns (e.g., `.*`, short generic patterns, heavy wildcards) and continues to lower confidence when unsupported clauses are present.
 
 ### 4.2 Human-in-the-Loop Feedback
 - **Task:** Add a `mis-detection` flag to the suite report schema.
@@ -99,6 +99,9 @@ Completed:
 - Semantic-match clause implemented in evaluator:
   - `response semantically matches "<text>"`
   - supported by linter clause-shape checks and evaluator tests.
+- Detection confidence heuristics improved:
+  - Regex-based clauses now emit lower confidence for broad patterns.
+  - Expression-level confidence now aggregates clause confidence and unsupported-clause penalties.
 - New `argus lint` command added in `argus/cli.py`.
   - Supports single-file lint and batch lint via `--scenario-dir/--pattern` or `--scenario-list`.
   - Includes checks for invalid regex, unsupported clause shapes, orphaned string criteria, hardcoded email detections, unreachable dynamic triggers/actions, and unreachable stop conditions.
