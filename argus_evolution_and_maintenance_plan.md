@@ -55,7 +55,7 @@
 - **DSL Reference:** A comprehensive, versioned reference of all available DSL clauses and their expected behavior.
 
 ### 3.2 The "Scenario Cookbook"
-- **Task:** Build a library of "Reference Patterns" in a new `docs/cookbook/` directory.
+- **Task:** Build a library of "Reference Patterns" in a new `docs/cookbook/` directory. [Implemented (initial set)]
 - **Patterns:**
     - *The Pivot:* User changes requirements mid-stream.
     - *The Pressure:* User becomes aggressive/insistent.
@@ -116,6 +116,11 @@ Completed:
 - Interactive schema explain command implemented:
   - `python -m argus.cli explain <field_path>`
   - Example: `python -m argus.cli explain conversation.stop_conditions`
+- Scenario cookbook initial set implemented:
+  - `docs/cookbook/README.md`
+  - `docs/cookbook/pivot.md`
+  - `docs/cookbook/pressure.md`
+  - `docs/cookbook/trap.md`
 
 Validation:
 - Unit tests passing (`77/77`).

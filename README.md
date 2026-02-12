@@ -335,6 +335,7 @@ Runtime/evaluation support:
 - `conversation.stop_conditions` are enforced by the runner.
 - `turn_assertions` are evaluated as weighted success checks.
 - Dynamic event authoring guide: `docs/dynamic_events.md`.
+- Scenario cookbook patterns: `docs/cookbook/README.md`.
 
 ## Authoring Example
 
