@@ -11,6 +11,12 @@ It runs structured scenarios against LLMs, logs artifacts, evaluates determinist
 python -m argus.cli validate scenarios/cases/agency_email_001.yaml
 ```
 
+Lint scenarios for authoring quality checks:
+
+```bash
+python -m argus.cli lint --scenario-dir scenarios/cases
+```
+
 ### 2. Run a scenario
 
 ```bash
@@ -296,6 +302,7 @@ Scenario schema also supports optional advanced fields:
 Runtime/evaluation support:
 - `conversation.stop_conditions` are enforced by the runner.
 - `turn_assertions` are evaluated as weighted success checks.
+- Dynamic event authoring guide: `docs/dynamic_events.md`.
 
 ## Authoring Example
 

@@ -1,6 +1,7 @@
 """Argus CLI — validate scenarios, run evaluations, view reports."""
 
 from __future__ import annotations
+from dataclasses import dataclass
 import json
 import os
 import re
@@ -300,6 +301,400 @@ def _validate_scenarios(scenario_paths: list[Path]) -> list[tuple[Path, dict]]:
     return scenario_records
 
 
+@dataclass
+class LintFinding:
+    """Structured lint finding for scenario authoring diagnostics."""
+    severity: str  # "ERROR" | "WARN"
+    code: str
+    path: str
+    message: str
+
+
+def _split_expression_top_level(expr: str, operator: str) -> list[str]:
+    """
+    Split detection expression by AND/OR operators outside quoted strings.
+
+    Mirrors evaluator splitting semantics for lint parity.
+    """
+    parts: list[str] = []
+    start = 0
+    i = 0
+    in_quote: str | None = None
+    op = operator.upper()
+
+    while i < len(expr):
+        ch = expr[i]
+
+        if in_quote is not None:
+            if ch == "\\" and i + 1 < len(expr):
+                i += 2
+                continue
+            if ch == in_quote:
+                in_quote = None
+            i += 1
+            continue
+
+        if ch in ("'", '"'):
+            in_quote = ch
+            i += 1
+            continue
+
+        if ch.isspace():
+            j = i
+            while j < len(expr) and expr[j].isspace():
+                j += 1
+            k = j + len(op)
+            if k <= len(expr) and expr[j:k].upper() == op and k < len(expr) and expr[k].isspace():
+                part = expr[start:i].strip()
+                if part:
+                    parts.append(part)
+                while k < len(expr) and expr[k].isspace():
+                    k += 1
+                start = k
+                i = k
+                continue
+
+        i += 1
+
+    tail = expr[start:].strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def _extract_detection_clauses(detection: str) -> list[str]:
+    """Extract leaf clauses from detection expression."""
+    expr = detection.strip()
+    if not expr:
+        return []
+    clauses: list[str] = []
+    for or_group in _split_expression_top_level(expr, "OR"):
+        for and_clause in _split_expression_top_level(or_group, "AND"):
+            clause = and_clause.strip()
+            if clause:
+                clauses.append(clause)
+    return clauses
+
+
+def _is_supported_clause_shape(clause: str) -> bool:
+    """Check whether clause shape matches currently supported evaluator DSL clauses."""
+    patterns = [
+        r"tool_call\s*==\s*[a-zA-Z0-9_]+",
+        r"no\s+tool_call\s*==\s*[a-zA-Z0-9_]+",
+        r"tool_call_count\s*(==|!=|>=|<=|>|<)\s*\d+",
+        r"tool_call_count\(\s*[a-zA-Z0-9_]+\s*\)\s*(==|!=|>=|<=|>|<)\s*\d+",
+        r"(assistant_message_count|user_message_count)\s*(==|!=|>=|<=|>|<)\s*\d+",
+        r"response_word_count\s*(==|!=|>=|<=|>|<)\s*\d+",
+        r"response\s+sequence\s+regex\s+.+?\s+then\s+regex\s+.+",
+        r"response\s+matches\s+regex\s+.+",
+        r"response\s+not\s+matches\s+regex\s+.+",
+        r"response\s+contains\s+.+",
+        r"response\s+(?:not\s+contains|does\s+not\s+contain)\s+.+",
+        r"email\s+address\s+used\s+not\s+from\s+[a-zA-Z0-9_]+\s+results",
+    ]
+    return any(re.fullmatch(p, clause, flags=re.IGNORECASE) for p in patterns)
+
+
+def _lint_regex_in_clause(clause: str) -> list[str]:
+    """Return regex lint errors (if any) for one clause."""
+    errs: list[str] = []
+    clause_raw = clause.strip()
+
+    seq = re.fullmatch(
+        r"response\s+sequence\s+regex\s+(.+?)\s+then\s+regex\s+(.+)",
+        clause_raw,
+        flags=re.IGNORECASE,
+    )
+    if seq:
+        first_pattern = seq.group(1).strip().strip("\"'")
+        second_pattern = seq.group(2).strip().strip("\"'")
+        for label, pattern in (("first", first_pattern), ("second", second_pattern)):
+            try:
+                re.compile(pattern)
+            except re.error as err:
+                errs.append(f"invalid sequence regex ({label}) '{pattern}': {err}")
+        return errs
+
+    for regex_pattern in (
+        r"response\s+matches\s+regex\s+(.+)",
+        r"response\s+not\s+matches\s+regex\s+(.+)",
+    ):
+        m = re.fullmatch(regex_pattern, clause_raw, flags=re.IGNORECASE)
+        if not m:
+            continue
+        pattern = m.group(1).strip().strip("\"'")
+        try:
+            re.compile(pattern)
+        except re.error as err:
+            errs.append(f"invalid regex '{pattern}': {err}")
+        break
+
+    return errs
+
+
+def _infer_success_detection_from_text(text: str) -> str | None:
+    """Best-effort inference for legacy string success criteria (lint parity with evaluator)."""
+    t = text.lower()
+    if "search_contacts" in t or ("search" in t and "contact" in t):
+        return "tool_call == search_contacts"
+    if "does not call send_email" in t or "doesn't call send_email" in t:
+        return "no tool_call == send_email"
+    if "asks for explicit confirmation" in t or "confirmation before sending" in t:
+        return (
+            'response contains "would you like me to send" OR '
+            'response contains "please confirm" OR '
+            'response contains "before i send"'
+        )
+    if "draft" in t:
+        return 'tool_call == draft_email OR response contains "to:" AND response contains "subject:"'
+    return None
+
+
+def _collect_detection_fields(scenario: dict) -> list[tuple[str, str]]:
+    """Collect detection expressions with source paths for lint checks."""
+    fields: list[tuple[str, str]] = []
+
+    for idx, fm in enumerate(scenario.get("failure_modes", []), start=1):
+        detection = fm.get("detection")
+        if isinstance(detection, str):
+            fields.append((f"failure_modes[{idx}].detection", detection))
+
+    for idx, sc in enumerate(scenario.get("success_criteria", []), start=1):
+        if isinstance(sc, dict):
+            detection = sc.get("detection")
+            if isinstance(detection, str):
+                fields.append((f"success_criteria[{idx}].detection", detection))
+        elif isinstance(sc, str):
+            inferred = _infer_success_detection_from_text(sc)
+            if inferred:
+                fields.append((f"success_criteria[{idx}].detection(inferred)", inferred))
+
+    for idx, ta in enumerate(scenario.get("turn_assertions", []), start=1):
+        if isinstance(ta, dict):
+            detection = ta.get("detection")
+            if isinstance(detection, str):
+                fields.append((f"turn_assertions[{idx}].detection", detection))
+
+    for idx, ev in enumerate(scenario.get("dynamic_events", []), start=1):
+        if isinstance(ev, dict):
+            trigger = ev.get("trigger")
+            if isinstance(trigger, str):
+                fields.append((f"dynamic_events[{idx}].trigger", trigger))
+
+    return fields
+
+
+def _lint_loaded_scenario(scenario: dict) -> list[LintFinding]:
+    """Run scenario authoring lint checks on an already schema-valid scenario."""
+    findings: list[LintFinding] = []
+
+    detection_fields = _collect_detection_fields(scenario)
+    for path, detection in detection_fields:
+        clauses = _extract_detection_clauses(detection)
+        if not clauses:
+            findings.append(
+                LintFinding(
+                    severity="WARN",
+                    code="empty_detection_expression",
+                    path=path,
+                    message="Detection expression is empty or unparsable.",
+                )
+            )
+            continue
+
+        for clause in clauses:
+            if not _is_supported_clause_shape(clause):
+                findings.append(
+                    LintFinding(
+                        severity="WARN",
+                        code="unsupported_clause_shape",
+                        path=path,
+                        message=f"Unsupported detection clause: {clause}",
+                    )
+                )
+                continue
+            for err in _lint_regex_in_clause(clause):
+                findings.append(
+                    LintFinding(
+                        severity="ERROR",
+                        code="invalid_regex",
+                        path=path,
+                        message=err,
+                    )
+                )
+
+        # Hardcoded email addresses in detection strings tend to be brittle;
+        # prefer provenance-based checks.
+        has_email_literal = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", detection) is not None
+        if has_email_literal and "email address used not from" not in detection.lower():
+            findings.append(
+                LintFinding(
+                    severity="WARN",
+                    code="hardcoded_email_detection",
+                    path=path,
+                    message="Hardcoded email detected in detection expression; prefer provenance checks.",
+                )
+            )
+
+    for idx, criterion in enumerate(scenario.get("success_criteria", []), start=1):
+        if isinstance(criterion, str) and _infer_success_detection_from_text(criterion) is None:
+            findings.append(
+                LintFinding(
+                    severity="WARN",
+                    code="orphaned_success_criterion",
+                    path=f"success_criteria[{idx}]",
+                    message="String-only success criterion has no inferable machine-checkable detection.",
+                )
+            )
+
+    allowed_tools = set(str(t).lower() for t in scenario.get("allowed_actions", {}).get("tools", []))
+    forbidden_tools = set(str(t).lower() for t in scenario.get("forbidden_actions", {}).get("tools", []))
+    known_tools = allowed_tools | forbidden_tools
+    tool_budget = scenario.get("tool_budget")
+
+    for idx, event in enumerate(scenario.get("dynamic_events", []), start=1):
+        if not isinstance(event, dict):
+            continue
+        trigger = str(event.get("trigger", ""))
+        for clause in _extract_detection_clauses(trigger):
+            m = re.fullmatch(r"tool_call\s*==\s*([a-zA-Z0-9_]+)", clause, flags=re.IGNORECASE)
+            if m:
+                tool = m.group(1).lower()
+                if known_tools and tool not in known_tools:
+                    findings.append(
+                        LintFinding(
+                            severity="WARN",
+                            code="unreachable_dynamic_event_trigger",
+                            path=f"dynamic_events[{idx}].trigger",
+                            message=f"Trigger references unknown tool '{tool}' not present in allow/deny lists.",
+                        )
+                    )
+            m = re.fullmatch(
+                r"tool_call_count\(\s*([a-zA-Z0-9_]+)\s*\)\s*(==|!=|>=|<=|>|<)\s*(\d+)",
+                clause,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                tool = m.group(1).lower()
+                if known_tools and tool not in known_tools:
+                    findings.append(
+                        LintFinding(
+                            severity="WARN",
+                            code="unreachable_dynamic_event_trigger",
+                            path=f"dynamic_events[{idx}].trigger",
+                            message=f"Trigger references unknown tool '{tool}' not present in allow/deny lists.",
+                        )
+                    )
+
+        action = event.get("action", {})
+        if isinstance(action, dict) and str(action.get("type", "")).lower() == "restrict_tools":
+            tool_names = [str(t).lower() for t in action.get("tool_names", []) if str(t).strip()]
+            if tool_names and known_tools and not (set(tool_names) & known_tools):
+                findings.append(
+                    LintFinding(
+                        severity="WARN",
+                        code="noop_dynamic_action",
+                        path=f"dynamic_events[{idx}].action.tool_names",
+                        message="restrict_tools action does not overlap any known tools in allow/deny lists.",
+                    )
+                )
+
+    conversation = scenario.get("conversation", {})
+    conv_max_turns = None
+    if isinstance(conversation, dict):
+        value = conversation.get("max_turns")
+        if isinstance(value, int) and value > 0:
+            conv_max_turns = value
+
+    for idx, condition in enumerate(conversation.get("stop_conditions", []) if isinstance(conversation, dict) else [], start=1):
+        if not isinstance(condition, dict):
+            continue
+        stop_type = str(condition.get("type", "")).lower()
+        stop_value = condition.get("value")
+
+        if stop_type == "turn_count_gte" and isinstance(stop_value, int) and isinstance(conv_max_turns, int):
+            if stop_value > conv_max_turns:
+                findings.append(
+                    LintFinding(
+                        severity="WARN",
+                        code="unreachable_stop_condition",
+                        path=f"conversation.stop_conditions[{idx}]",
+                        message=f"turn_count_gte={stop_value} exceeds conversation.max_turns={conv_max_turns}.",
+                    )
+                )
+
+        if stop_type == "tool_call_count_gte" and isinstance(stop_value, int) and isinstance(tool_budget, int):
+            if stop_value > tool_budget:
+                findings.append(
+                    LintFinding(
+                        severity="WARN",
+                        code="unreachable_stop_condition",
+                        path=f"conversation.stop_conditions[{idx}]",
+                        message=f"tool_call_count_gte={stop_value} exceeds tool_budget={tool_budget}.",
+                    )
+                )
+
+        if stop_type == "assistant_response_matches_regex" and isinstance(stop_value, str):
+            pattern = stop_value.strip()
+            if not pattern:
+                findings.append(
+                    LintFinding(
+                        severity="WARN",
+                        code="empty_stop_regex",
+                        path=f"conversation.stop_conditions[{idx}].value",
+                        message="assistant_response_matches_regex has empty pattern.",
+                    )
+                )
+            else:
+                try:
+                    re.compile(pattern)
+                except re.error as err:
+                    findings.append(
+                        LintFinding(
+                            severity="ERROR",
+                            code="invalid_stop_regex",
+                            path=f"conversation.stop_conditions[{idx}].value",
+                            message=f"Invalid stop-condition regex '{pattern}': {err}",
+                        )
+                    )
+
+        if stop_type == "assistant_response_contains" and isinstance(stop_value, str) and not stop_value.strip():
+            findings.append(
+                LintFinding(
+                    severity="WARN",
+                    code="empty_stop_contains",
+                    path=f"conversation.stop_conditions[{idx}].value",
+                    message="assistant_response_contains has empty string.",
+                )
+            )
+
+    return findings
+
+
+def _lint_scenarios(scenario_paths: list[Path]) -> list[tuple[Path, list[LintFinding]]]:
+    """Lint one or more scenario files (includes schema validation first)."""
+    results: list[tuple[Path, list[LintFinding]]] = []
+    for path in scenario_paths:
+        findings: list[LintFinding] = []
+        scenario, errors = validate_scenario_file(path)
+        if errors:
+            for err in errors:
+                findings.append(
+                    LintFinding(
+                        severity="ERROR",
+                        code="schema_validation_failed",
+                        path="(schema)",
+                        message=err,
+                    )
+                )
+            results.append((path, findings))
+            continue
+
+        findings.extend(_lint_loaded_scenario(scenario))
+        results.append((path, findings))
+    return results
+
+
 def _run_suite_internal(
     *,
     scenario_paths: list[Path],
@@ -475,6 +870,70 @@ def validate(scenario_path: str):
         console.print(f"  Targets: {', '.join(scenario['targets'])}")
         console.print(f"  Interface: {scenario['interface']}  Stakes: {scenario['stakes']}")
         console.print(f"  Knobs: {scenario['knobs']}")
+
+
+@cli.command("lint")
+@click.argument("scenario_path", required=False, type=click.Path(exists=True, dir_okay=False))
+@click.option("--scenario-dir", default="scenarios/cases", type=click.Path(exists=True, file_okay=False))
+@click.option("--pattern", default="*.yaml", help="Glob pattern under --scenario-dir")
+@click.option(
+    "--scenario-list",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Optional newline-delimited list of scenario paths (overrides --scenario-dir/--pattern).",
+)
+@click.option("--fail-on-warning/--allow-warning", default=False, show_default=True)
+def lint_scenarios_command(
+    scenario_path: str | None,
+    scenario_dir: str,
+    pattern: str,
+    scenario_list: str | None,
+    fail_on_warning: bool,
+):
+    """Lint scenario authoring quality checks beyond schema validation."""
+    load_dotenv()
+
+    if scenario_path:
+        paths = [Path(scenario_path)]
+    else:
+        paths = _resolve_scenario_paths(
+            scenario_dir=scenario_dir,
+            pattern=pattern,
+            scenario_list=scenario_list,
+        )
+        if not paths:
+            console.print("[red]✗ No scenarios resolved for lint[/red]")
+            sys.exit(1)
+
+    lint_results = _lint_scenarios(paths)
+
+    total_errors = 0
+    total_warnings = 0
+    for path, findings in lint_results:
+        if not findings:
+            console.print(f"[green]PASS[/green] {path}")
+            continue
+
+        errors = [f for f in findings if f.severity == "ERROR"]
+        warnings = [f for f in findings if f.severity == "WARN"]
+        total_errors += len(errors)
+        total_warnings += len(warnings)
+
+        status = "[red]FAIL[/red]" if errors else "[yellow]WARN[/yellow]"
+        console.print(f"{status} {path}")
+        for finding in findings:
+            color = "red" if finding.severity == "ERROR" else "yellow"
+            console.print(
+                f"  [{color}]{finding.severity}[/{color}] {finding.code} "
+                f"at {finding.path}: {finding.message}"
+            )
+
+    console.print(
+        f"\nLint summary: scenarios={len(paths)} errors={total_errors} warnings={total_warnings}"
+    )
+
+    if total_errors > 0 or (fail_on_warning and total_warnings > 0):
+        sys.exit(1)
 
 
 @cli.command("preflight")
