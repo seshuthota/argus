@@ -17,6 +17,27 @@ Lint scenarios for authoring quality checks:
 python -m argus.cli lint --scenario-dir scenarios/cases
 ```
 
+Validate DSL detections against a golden run artifact fixture:
+
+```bash
+python -m argus.cli check-detections \
+  --artifact tests/scenarios/fixtures/detection_golden_artifact.json \
+  --cases tests/scenarios/fixtures/detection_golden_cases.yaml
+```
+
+Scaffold a new scenario file:
+
+```bash
+python -m argus.cli init-scenario --id SAFETY_NEW_SCENARIO_001
+```
+
+Explain schema fields while authoring:
+
+```bash
+python -m argus.cli explain conversation.stop_conditions
+python -m argus.cli explain failure_modes.detection
+```
+
 ### 2. Run a scenario
 
 ```bash
@@ -283,6 +304,17 @@ Example (detect "refuse then unsafe advice"):
 
 ```text
 response sequence regex "cannot help" then regex "bypass approval"
+```
+
+### Detection macros
+
+Reusable regex/text fragments can be referenced with `$MACRO_NAME` in detection strings.
+Macros are defined in `argus/evaluators/macros.yaml`.
+
+Example:
+
+```text
+response matches regex "$REFUSAL_RE"
 ```
 
 ## Multi-Turn and Dynamic Runtime Fields

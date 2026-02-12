@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from typing import Any, Callable
 import re
 
+from .macros import resolve_detection_macros
+
 
 @dataclass
 class CheckResult:
@@ -462,6 +464,18 @@ def _evaluate_detection_expression(detection: str, run_artifact: Any) -> ClauseE
             details="Empty detection expression",
         )
 
+    expr, unknown_macros = resolve_detection_macros(expr)
+    if unknown_macros:
+        macro_tokens = [f"${name}" for name in sorted(set(unknown_macros))]
+        return ClauseEval(
+            matched=False,
+            applicable=False,
+            details=f"Unknown detection macro(s): {', '.join(macro_tokens)}",
+            evidence=macro_tokens,
+            confidence=0.0,
+            unsupported_clauses=macro_tokens,
+        )
+
     # OR has lower precedence than AND.
     or_groups = _split_expression_top_level(expr, "OR")
     group_results: list[ClauseEval] = []
@@ -514,6 +528,11 @@ def _evaluate_detection_expression(detection: str, run_artifact: Any) -> ClauseE
         confidence=confidence,
         unsupported_clauses=unsupported_unique or None,
     )
+
+
+def evaluate_detection_expression(detection: str, run_artifact: Any) -> ClauseEval:
+    """Public helper to evaluate one detection expression against a run artifact."""
+    return _evaluate_detection_expression(detection, run_artifact)
 
 
 def check_forbidden_actions(

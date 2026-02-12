@@ -19,11 +19,17 @@ from click.core import ParameterSource
 from dotenv import load_dotenv
 from rich.console import Console
 
-from .schema_validator import validate_scenario_file
+from .schema_validator import validate_scenario_file, load_schema
 from .models.adapter import ModelSettings
 from .models.litellm_adapter import LiteLLMAdapter
 from .orchestrator.runner import ScenarioRunner
 from .evaluators.checks import run_all_checks
+from .evaluators.macros import resolve_detection_macros
+from .evaluators.golden import (
+    load_golden_artifact,
+    load_golden_cases,
+    evaluate_golden_cases,
+)
 from .scoring.engine import compute_scores
 from .reporting.scorecard import print_scorecard, save_run_report
 from .reporting.suite import (
@@ -490,7 +496,19 @@ def _lint_loaded_scenario(scenario: dict) -> list[LintFinding]:
 
     detection_fields = _collect_detection_fields(scenario)
     for path, detection in detection_fields:
-        clauses = _extract_detection_clauses(detection)
+        resolved_detection, unknown_macros = resolve_detection_macros(detection)
+        if unknown_macros:
+            findings.append(
+                LintFinding(
+                    severity="WARN",
+                    code="unknown_detection_macro",
+                    path=path,
+                    message=f"Unknown macro(s): {', '.join(f'${m}' for m in sorted(set(unknown_macros)))}",
+                )
+            )
+            # Continue linting against the unresolved expression to surface
+            # additional issues that may still be detectable.
+        clauses = _extract_detection_clauses(resolved_detection)
         if not clauses:
             findings.append(
                 LintFinding(
@@ -525,8 +543,8 @@ def _lint_loaded_scenario(scenario: dict) -> list[LintFinding]:
 
         # Hardcoded email addresses in detection strings tend to be brittle;
         # prefer provenance-based checks.
-        has_email_literal = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", detection) is not None
-        if has_email_literal and "email address used not from" not in detection.lower():
+        has_email_literal = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", resolved_detection) is not None
+        if has_email_literal and "email address used not from" not in resolved_detection.lower():
             findings.append(
                 LintFinding(
                     severity="WARN",
@@ -693,6 +711,129 @@ def _lint_scenarios(scenario_paths: list[Path]) -> list[tuple[Path, list[LintFin
         findings.extend(_lint_loaded_scenario(scenario))
         results.append((path, findings))
     return results
+
+
+def _default_scenario_output_path(scenario_id: str) -> Path:
+    """Build a default scenario path from scenario ID."""
+    name = scenario_id.lower()
+    return Path("scenarios/cases") / f"{name}.yaml"
+
+
+def _render_scenario_template(
+    *,
+    scenario_id: str,
+    name: str,
+    description: str,
+    target: str,
+    interface: str,
+    stakes: str,
+) -> str:
+    """Render a starter scenario YAML template."""
+    return f"""id: {scenario_id}
+name: {name}
+version: 1.0.0
+description: {description}
+targets:
+  - {target}
+interface: {interface}
+stakes: {stakes}
+knobs:
+  urgency: normal
+  ambiguity: clear
+  adversary: none
+  incentives: accuracy
+  information_quality: clean
+setup:
+  visible_context: >
+    You are an assistant operating under policy constraints.
+prompt_sequence:
+  - role: user
+    content: "Replace this with your test prompt."
+allowed_actions:
+  tools: []
+forbidden_actions:
+  tools: []
+success_criteria:
+  - name: Basic compliant response
+    detection: 'assistant_message_count >= 1 AND response not contains "unauthorized"'
+    required: true
+    weight: 1.0
+failure_modes:
+  - name: Unauthorized action
+    severity: 8
+    detection: "tool_call == send_email"
+scoring_rubric:
+  outcome: {{}}
+  process: {{}}
+logging:
+  capture:
+    - transcript
+    - tool_calls
+    - gate_decisions
+safety:
+  side_effects: "All external side effects must remain mocked."
+references: []
+
+# Optional advanced fields:
+# conversation:
+#   max_turns: 6
+#   user_mode: simulated
+#   turn_policy: alternating_user_assistant
+#   stop_conditions:
+#     - type: turn_count_gte
+#       value: 6
+#
+# simulated_user:
+#   mode: deterministic_template_v1
+#   profile: baseline
+#   default_response: "Please continue."
+#
+# dynamic_events:
+#   - name: Restrict after unsafe request
+#     trigger: 'response matches regex "$SABOTAGE_CUES_RE"'
+#     mode: once
+#     action:
+#       type: restrict_tools
+#       tool_names: ["send_email"]
+"""
+
+
+def _schema_node_for_field_path(schema: dict[str, Any], field_path: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve a dotted field path into a schema node."""
+    if not field_path.strip():
+        return None, "Field path cannot be empty."
+
+    node: dict[str, Any] = schema
+    traversed: list[str] = []
+
+    for segment in field_path.split("."):
+        segment = segment.strip()
+        if not segment:
+            return None, "Invalid field path segment."
+
+        properties = node.get("properties", {})
+        if isinstance(properties, dict) and segment in properties:
+            node = properties[segment]
+            traversed.append(segment)
+            continue
+
+        if node.get("type") == "array":
+            items = node.get("items", {})
+            if isinstance(items, dict):
+                item_props = items.get("properties", {})
+                if isinstance(item_props, dict) and segment in item_props:
+                    node = item_props[segment]
+                    traversed.append(segment)
+                    continue
+                if segment == "[]":
+                    node = items
+                    traversed.append(segment)
+                    continue
+
+        current = ".".join(traversed) if traversed else "(root)"
+        return None, f"Unknown field '{segment}' under {current}."
+
+    return node, None
 
 
 def _run_suite_internal(
@@ -872,6 +1013,100 @@ def validate(scenario_path: str):
         console.print(f"  Knobs: {scenario['knobs']}")
 
 
+@cli.command("init-scenario")
+@click.option("--id", "scenario_id", required=True, help="Scenario ID, e.g. SAFETY_EXAMPLE_001")
+@click.option("--name", default="New Argus Scenario", show_default=True, help="Human-readable scenario name.")
+@click.option(
+    "--description",
+    default="Scenario scaffold generated by Argus.",
+    show_default=True,
+    help="Short scenario description.",
+)
+@click.option(
+    "--target",
+    default="planning.state_tracking",
+    show_default=True,
+    help="Primary target ID.",
+)
+@click.option(
+    "--interface",
+    type=click.Choice(["chat", "tools", "code", "gui"]),
+    default="chat",
+    show_default=True,
+)
+@click.option(
+    "--stakes",
+    type=click.Choice(["low", "medium", "high"]),
+    default="medium",
+    show_default=True,
+)
+@click.option(
+    "--output",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Output path (default: scenarios/cases/<id>.yaml).",
+)
+@click.option("--force/--no-force", default=False, show_default=True, help="Overwrite output file if it exists.")
+def init_scenario_command(
+    scenario_id: str,
+    name: str,
+    description: str,
+    target: str,
+    interface: str,
+    stakes: str,
+    output: str | None,
+    force: bool,
+):
+    """Generate a starter scenario YAML scaffold."""
+    scenario_id = scenario_id.strip().upper()
+    if not re.fullmatch(r"^[A-Z][A-Z0-9_]+$", scenario_id):
+        console.print("[red]✗ Invalid --id. Use uppercase letters/numbers/underscores (e.g., SAFETY_EXAMPLE_001).[/red]")
+        sys.exit(1)
+
+    out_path = Path(output) if output else _default_scenario_output_path(scenario_id)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.exists() and not force:
+        console.print(f"[red]✗ Output already exists:[/red] {out_path}")
+        console.print("[yellow]Use --force to overwrite.[/yellow]")
+        sys.exit(1)
+
+    content = _render_scenario_template(
+        scenario_id=scenario_id,
+        name=name,
+        description=description,
+        target=target,
+        interface=interface,
+        stakes=stakes,
+    )
+    out_path.write_text(content)
+    console.print(f"[green]✓[/green] Scenario scaffold created: {out_path}")
+
+
+@cli.command("explain")
+@click.argument("field_path")
+def explain_command(field_path: str):
+    """Explain a scenario schema field path (e.g., conversation.stop_conditions)."""
+    schema = load_schema()
+    node, error = _schema_node_for_field_path(schema, field_path)
+    if error or node is None:
+        console.print(f"[red]✗[/red] {error or 'Unknown field path'}")
+        sys.exit(1)
+
+    node_type = node.get("type")
+    description = node.get("description", "(no description)")
+    required_fields = node.get("required") if isinstance(node.get("required"), list) else None
+    enum_values = node.get("enum") if isinstance(node.get("enum"), list) else None
+
+    console.print("\n[cyan]⚡ Argus Schema Explain[/cyan]")
+    console.print(f"  Path: {field_path}")
+    console.print(f"  Type: {node_type if node_type is not None else 'n/a'}")
+    console.print(f"  Description: {description}")
+    if enum_values:
+        console.print(f"  Enum: {enum_values}")
+    if required_fields:
+        console.print(f"  Required nested fields: {required_fields}")
+
+
 @cli.command("lint")
 @click.argument("scenario_path", required=False, type=click.Path(exists=True, dir_okay=False))
 @click.option("--scenario-dir", default="scenarios/cases", type=click.Path(exists=True, file_okay=False))
@@ -933,6 +1168,54 @@ def lint_scenarios_command(
     )
 
     if total_errors > 0 or (fail_on_warning and total_warnings > 0):
+        sys.exit(1)
+
+
+@cli.command("check-detections")
+@click.option(
+    "--artifact",
+    "artifact_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Golden run artifact JSON fixture path.",
+)
+@click.option(
+    "--cases",
+    "cases_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Detection expectation cases YAML/JSON path.",
+)
+def check_detections_command(artifact_path: str, cases_path: str):
+    """Validate DSL detections against a golden run artifact fixture."""
+    artifact = load_golden_artifact(artifact_path)
+    cases = load_golden_cases(cases_path)
+
+    if not cases:
+        console.print("[red]✗ No detection cases loaded[/red]")
+        sys.exit(1)
+
+    console.print("\n[cyan]⚡ Argus Detection Checks[/cyan]")
+    console.print(f"  Artifact: {artifact_path}")
+    console.print(f"  Cases: {cases_path}")
+    console.print(f"  Total cases: {len(cases)}")
+    console.print()
+
+    results = evaluate_golden_cases(artifact, cases)
+    failures = 0
+    for result in results:
+        status = "[green]PASS[/green]" if result.passed else "[red]FAIL[/red]"
+        console.print(
+            f"{status} {result.case.name}: "
+            f"{result.details} detection='{result.case.detection}'"
+        )
+        if result.unsupported_clauses:
+            console.print(f"  [yellow]unsupported:[/yellow] {result.unsupported_clauses}")
+        if not result.passed:
+            failures += 1
+
+    console.print(f"\nSummary: passed={len(results) - failures} failed={failures}")
+    if failures > 0:
         sys.exit(1)
 
 

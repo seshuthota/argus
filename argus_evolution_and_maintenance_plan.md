@@ -37,12 +37,12 @@
     - Hardcoded email addresses that should use provenance checks.
 
 ### 2.2 Detection Unit Testing (Golden Artifacts)
-- **Task:** Create a testing utility for authors to verify their DSL logic.
+- **Task:** Create a testing utility for authors to verify their DSL logic. [Implemented]
 - **Details:** Allow authors to provide "Golden Artifacts" (mock `RunArtifact` JSONs) and assert that specific DSL strings correctly trigger or miss them.
 - **Location:** `tests/scenarios/test_detections.py`.
 
 ### 2.3 Scenario Scaffolding
-- **Task:** Add `python -m argus.cli init-scenario`.
+- **Task:** Add `python -m argus.cli init-scenario`. [Implemented]
 - **Details:** Generate a boilerplate YAML with all required fields and inline documentation explaining advanced fields like `dynamic_events` and `simulated_user`.
 
 ---
@@ -62,7 +62,7 @@
     - *The Trap:* User provides a tool with a subtle bug to see if the model corrects it.
 
 ### 3.3 Interactive Schema Explanation
-- **Task:** Add `python -m argus.cli explain <field_path>`.
+- **Task:** Add `python -m argus.cli explain <field_path>`. [Implemented]
 - **Details:** Use the JSON Schema descriptions to provide instant CLI help for scenario authors (e.g., `argus explain conversation.stop_conditions`).
 
 ---
@@ -90,15 +90,35 @@
 ## 6. Progress Update (2026-02-12)
 
 Completed:
+- Detection macro support implemented:
+  - Registry file: `argus/evaluators/macros.yaml`
+  - Resolver utility: `argus/evaluators/macros.py`
+  - Runtime integration: evaluator expands `$MACRO_NAME` in detection expressions before clause evaluation.
+  - Unknown macros are surfaced as unsupported detection diagnostics.
 - Detection DSL evaluation refactored to a pattern-handler dispatch registry in `argus/evaluators/checks.py`.
 - New `argus lint` command added in `argus/cli.py`.
   - Supports single-file lint and batch lint via `--scenario-dir/--pattern` or `--scenario-list`.
   - Includes checks for invalid regex, unsupported clause shapes, orphaned string criteria, hardcoded email detections, unreachable dynamic triggers/actions, and unreachable stop conditions.
 - Dynamic events documentation added at `docs/dynamic_events.md`.
 - Tests added for lint behavior in `tests/test_cli_lint.py`.
+- Golden artifact detection validation utility implemented:
+  - CLI command: `python -m argus.cli check-detections --artifact ... --cases ...`
+  - Utility module: `argus/evaluators/golden.py`
+  - Fixture-based tests:
+    - `tests/scenarios/test_detections.py`
+    - `tests/test_detection_golden.py`
+  - Fixture files:
+    - `tests/scenarios/fixtures/detection_golden_artifact.json`
+    - `tests/scenarios/fixtures/detection_golden_cases.yaml`
+- Scenario scaffolding command implemented:
+  - `python -m argus.cli init-scenario --id SAFETY_EXAMPLE_001`
+  - Generates schema-valid starter YAML with optional advanced-field stubs.
+- Interactive schema explain command implemented:
+  - `python -m argus.cli explain <field_path>`
+  - Example: `python -m argus.cli explain conversation.stop_conditions`
 
 Validation:
-- Unit tests passing (`66/66`).
+- Unit tests passing (`77/77`).
 - Lint smoke checks:
   - `python -m argus.cli lint scenarios/cases/agency_email_001.yaml`
   - `python -m argus.cli lint --scenario-dir scenarios/cases --pattern '*.yaml'`

@@ -88,6 +88,13 @@ class CLILintTests(unittest.TestCase):
         findings = _lint_loaded_scenario(scenario)
         self.assertTrue(any(f.code == "hardcoded_email_detection" for f in findings))
 
+    def test_unknown_macro_warns(self) -> None:
+        scenario = _base_scenario()
+        scenario["failure_modes"][0]["detection"] = 'response matches regex "$DOES_NOT_EXIST"'
+
+        findings = _lint_loaded_scenario(scenario)
+        self.assertTrue(any(f.code == "unknown_detection_macro" for f in findings))
+
 
 if __name__ == "__main__":
     unittest.main()
