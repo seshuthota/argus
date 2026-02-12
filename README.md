@@ -306,6 +306,12 @@ Example (detect "refuse then unsafe advice"):
 response sequence regex "cannot help" then regex "bypass approval"
 ```
 
+10. Lightweight semantic match (token-overlap)
+
+```text
+response semantically matches "<text>"
+```
+
 ### Detection macros
 
 Reusable regex/text fragments can be referenced with `$MACRO_NAME` in detection strings.

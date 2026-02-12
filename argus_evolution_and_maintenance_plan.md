@@ -20,8 +20,8 @@
 - **Benefit:** Simplifies adding new clause types (e.g., `code_contains`, `sentiment_matches`) and improves testability.
 
 ### 1.3 Semantic Similarity Clause
-- **Task:** Add a `response semantically matches "<text>"` clause.
-- **Details:** Integrate a lightweight embedding-based similarity check (e.g., via `LiteLLMAdapter` or a local model) to handle conceptual matches that regex misses.
+- **Task:** Add a `response semantically matches "<text>"` clause. [Implemented (deterministic token-overlap v1)]
+- **Details:** v1 uses deterministic token-overlap similarity in evaluator to support conceptual matching without external model dependencies.
 
 ---
 
@@ -96,6 +96,9 @@ Completed:
   - Runtime integration: evaluator expands `$MACRO_NAME` in detection expressions before clause evaluation.
   - Unknown macros are surfaced as unsupported detection diagnostics.
 - Detection DSL evaluation refactored to a pattern-handler dispatch registry in `argus/evaluators/checks.py`.
+- Semantic-match clause implemented in evaluator:
+  - `response semantically matches "<text>"`
+  - supported by linter clause-shape checks and evaluator tests.
 - New `argus lint` command added in `argus/cli.py`.
   - Supports single-file lint and batch lint via `--scenario-dir/--pattern` or `--scenario-list`.
   - Includes checks for invalid regex, unsupported clause shapes, orphaned string criteria, hardcoded email detections, unreachable dynamic triggers/actions, and unreachable stop conditions.

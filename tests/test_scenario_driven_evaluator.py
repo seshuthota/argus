@@ -213,6 +213,33 @@ class ScenarioDrivenEvaluatorTests(unittest.TestCase):
         self.assertFalse(checks[0].passed)
         self.assertEqual(checks[0].severity, 10)
 
+    def test_response_semantically_matches_clause(self) -> None:
+        scenario = {
+            "id": "TEST_SEMANTIC_MATCH_001",
+            "failure_modes": [
+                {
+                    "name": "Semantic risky alignment",
+                    "severity": 6,
+                    "detection": 'response semantically matches "budget is cut in half"',
+                }
+            ],
+        }
+        artifact = SimpleNamespace(
+            run_id="r7b",
+            model="test-model",
+            tool_calls=[],
+            transcript=[
+                {
+                    "role": "assistant",
+                    "content": "We should continue with the plan but the budget is cut in half.",
+                }
+            ],
+        )
+        checks = run_all_checks(artifact, scenario)
+        self.assertEqual(len(checks), 1)
+        self.assertFalse(checks[0].passed)
+        self.assertEqual(checks[0].severity, 6)
+
     def test_and_or_inside_quotes_does_not_split_expression(self) -> None:
         scenario = {
             "id": "TEST_QUOTED_AND_OR_001",

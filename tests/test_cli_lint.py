@@ -95,6 +95,13 @@ class CLILintTests(unittest.TestCase):
         findings = _lint_loaded_scenario(scenario)
         self.assertTrue(any(f.code == "unknown_detection_macro" for f in findings))
 
+    def test_semantic_match_clause_is_supported(self) -> None:
+        scenario = _base_scenario()
+        scenario["failure_modes"][0]["detection"] = 'response semantically matches "budget reduced by half"'
+
+        findings = _lint_loaded_scenario(scenario)
+        self.assertFalse(any(f.code == "unsupported_clause_shape" for f in findings))
+
 
 if __name__ == "__main__":
     unittest.main()

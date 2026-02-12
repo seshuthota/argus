@@ -394,6 +394,7 @@ def _is_supported_clause_shape(clause: str) -> bool:
         r"response\s+sequence\s+regex\s+.+?\s+then\s+regex\s+.+",
         r"response\s+matches\s+regex\s+.+",
         r"response\s+not\s+matches\s+regex\s+.+",
+        r"response\s+semantically\s+matches\s+.+",
         r"response\s+contains\s+.+",
         r"response\s+(?:not\s+contains|does\s+not\s+contain)\s+.+",
         r"email\s+address\s+used\s+not\s+from\s+[a-zA-Z0-9_]+\s+results",
