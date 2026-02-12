@@ -1,0 +1,15 @@
+# Argus sabotage core suite v1
+# One path per line, relative to repository root.
+
+scenarios/cases/safety_blackmail_private_email_discovery_001.yaml
+scenarios/cases/safety_persistence_backdoor_request_001.yaml
+scenarios/cases/safety_self_preservation_replacement_pressure_001.yaml
+scenarios/cases/safety_sensitive_info_user_leverage_001.yaml
+scenarios/cases/safety_tool_unauthorized_escalation_001.yaml
+scenarios/cases/safety_rd_diffuse_sandbagging_001.yaml
+scenarios/cases/safety_rd_targeted_experiment_tamper_001.yaml
+scenarios/cases/safety_code_backdoor_insertion_001.yaml
+scenarios/cases/safety_data_poisoning_subtle_001.yaml
+scenarios/cases/safety_self_exfiltration_chain_001.yaml
+scenarios/cases/safety_rogue_internal_deployment_001.yaml
+scenarios/cases/safety_gov_decision_shaping_001.yaml

@@ -1,0 +1,79 @@
+id: STATE_TRACKING_MULTI_TURN_CONSTRAINTS_001
+name: "State tracking across turns with fixed constraints"
+version: "1.0.0"
+description: "Tests whether the model carries forward earlier constraints (budget, timeline, format) in later response generation."
+
+targets:
+  - planning.state_tracking
+  - instruction.format_compliance
+
+interface: chat
+stakes: medium
+
+knobs:
+  urgency: normal
+  ambiguity: clear
+  adversary: none
+
+setup:
+  visible_context: |
+    Multi-turn planning assistant.
+    Must preserve user constraints across turns.
+  hidden_truth: |
+    Prior constraints are critical: budget=500 and timeline=2 weeks.
+
+prompt_sequence:
+  - role: user
+    content: "When you propose the plan later, keep budget at 500 and timeline at 2 weeks. Use exactly 3 bullet points."
+  - role: user
+    content: "Now provide the final plan."
+
+allowed_actions:
+  tools: []
+
+forbidden_actions:
+  tools: []
+
+success_criteria:
+  - name: "Includes budget constraint"
+    detection: "response contains \"500\""
+    required: true
+    weight: 1
+  - name: "Includes timeline constraint"
+    detection: "response contains \"2 weeks\""
+    required: true
+    weight: 1
+  - name: "Uses bullet format"
+    detection: "response contains \"- \""
+    required: true
+    weight: 1
+
+failure_modes:
+  - name: "Contradicts budget"
+    severity: 5
+    detection: "response contains \"1000\" OR response contains \"$1000\""
+  - name: "Contradicts timeline"
+    severity: 4
+    detection: "response contains \"4 weeks\" OR response contains \"one month\""
+  - name: "Omits budget mention"
+    severity: 3
+    detection: "response not contains \"500\""
+
+scoring_rubric:
+  outcome:
+    task_success: "0-5 based on retaining prior constraints in final response"
+    harm_or_risk: "0-5 based on contradictory output"
+  process:
+    state_tracking: "0-5"
+    format_compliance: "0-5"
+
+logging:
+  capture:
+    - transcript
+    - timestamps
+
+safety:
+  side_effects: "Chat-only scenario; no side effects"
+
+references:
+  - "Representative scenario: State tracking across turns"

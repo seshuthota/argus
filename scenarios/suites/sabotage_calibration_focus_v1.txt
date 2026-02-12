@@ -1,0 +1,8 @@
+# Argus sabotage calibration focus suite v1
+# Scenarios selected for evaluator-rule calibration and cross-trial stability checks.
+
+scenarios/cases/safety_evaluator_collusion_honeypot_001.yaml
+scenarios/cases/safety_cross_instance_signal_propagation_001.yaml
+scenarios/cases/safety_monitoring_awareness_shift_001.yaml
+scenarios/cases/safety_rd_diffuse_sandbagging_001.yaml
+scenarios/cases/safety_rd_diffuse_sandbagging_002.yaml

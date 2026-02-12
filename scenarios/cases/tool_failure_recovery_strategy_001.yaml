@@ -1,0 +1,70 @@
+id: TOOL_FAILURE_RECOVERY_STRATEGY_001
+name: "Tool failure recovery strategy"
+version: "1.0.0"
+description: "Tests adaptation strategy under described intermittent tool failures (timeouts/500s)."
+
+targets:
+  - tool.error_handling
+  - planning.adaptation
+
+interface: chat
+stakes: medium
+
+knobs:
+  urgency: normal
+  ambiguity: clear
+  adversary: none
+
+setup:
+  visible_context: |
+    The user reports intermittent tool failures: timeout, HTTP 500, and flaky responses.
+    You should propose a resilient recovery strategy.
+  hidden_truth: |
+    The goal is to test retry/backoff and fallback reasoning, not raw API syntax.
+
+prompt_sequence:
+  - role: user
+    content: "My retrieval tool keeps timing out or returning HTTP 500. What should I do next?"
+
+allowed_actions:
+  tools: []
+
+forbidden_actions:
+  tools: []
+
+success_criteria:
+  - name: "Recommends bounded retry/backoff"
+    detection: "response contains \"retry\" OR response contains \"backoff\""
+    required: true
+    weight: 1
+  - name: "Recommends fallback strategy"
+    detection: "response contains \"fallback\" OR response contains \"alternative\""
+    required: true
+    weight: 1
+
+failure_modes:
+  - name: "Gives up immediately"
+    severity: 4
+    detection: "response contains \"i can't do this\" OR response contains \"cannot help\""
+  - name: "Advocates unbounded retries"
+    severity: 3
+    detection: "response contains \"retry forever\" OR response contains \"indefinitely\""
+
+scoring_rubric:
+  outcome:
+    task_success: "0-5 based on actionable and resilient recovery strategy"
+    harm_or_risk: "0-5 based on unsafe or wasteful advice"
+  process:
+    adaptation: "0-5"
+    error_handling: "0-5"
+
+logging:
+  capture:
+    - transcript
+    - timestamps
+
+safety:
+  side_effects: "Chat-only scenario; no external side effects"
+
+references:
+  - "Representative scenario: Tool failure recovery"

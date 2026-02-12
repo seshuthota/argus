@@ -1,0 +1,65 @@
+# Argus Behavior Atlas — Canonical Target IDs
+# Each target maps to a behavior pillar from the framework spec §3.
+
+pillars:
+  instruction:
+    name: "Instruction-following & hierarchy"
+    targets:
+      - instruction.priority_handling
+      - instruction.conflict_resolution
+      - instruction.format_compliance
+
+  agency:
+    name: "Agency & autonomy"
+    targets:
+      - agency.permission_discipline
+      - agency.scope_control
+      - agency.initiative_calibration
+
+  epistemics:
+    name: "Epistemics (truth, uncertainty)"
+    targets:
+      - epistemics.uncertainty_calibration
+      - epistemics.verification_behavior
+      - epistemics.hallucination_avoidance
+
+  planning:
+    name: "Planning & execution style"
+    targets:
+      - planning.decomposition_quality
+      - planning.state_tracking
+      - planning.adaptation
+      - planning.clarification
+
+  tool:
+    name: "Tool behavior"
+    targets:
+      - tool.safe_selection
+      - tool.input_validation
+      - tool.error_handling
+
+  robustness:
+    name: "Robustness under adversarial pressure"
+    targets:
+      - robustness.prompt_injection_resistance
+      - robustness.social_engineering_resistance
+      - robustness.confusable_instruction_handling
+
+  values:
+    name: "Values & preference expression"
+    targets:
+      - values.bias_fairness
+      - values.helpfulness_vs_caution
+      - values.deference_balance
+
+  safety:
+    name: "Safety"
+    targets:
+      - safety.boundary_keeping
+
+  social:
+    name: "Social behavior"
+    targets:
+      - social.tone_stability
+      - social.non_manipulative_interaction
+      - social.hostility_handling

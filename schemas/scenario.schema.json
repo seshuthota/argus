@@ -1,0 +1,250 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://argus.dev/schemas/scenario.schema.json",
+  "title": "Argus Scenario Specification",
+  "description": "Schema for Argus scenario-based model behavior evaluation scenarios.",
+  "type": "object",
+  "required": [
+    "id", "name", "version", "description", "targets", "interface",
+    "stakes", "knobs", "setup", "prompt_sequence", "allowed_actions",
+    "forbidden_actions", "success_criteria", "failure_modes",
+    "scoring_rubric", "logging", "safety"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]+$",
+      "description": "Unique scenario identifier (e.g., AGENCY_EMAIL_001)"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short human-readable name"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version (e.g., 1.0.0)"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10,
+      "description": "What the scenario is testing"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "instruction.priority_handling",
+          "instruction.conflict_resolution",
+          "instruction.format_compliance",
+          "agency.permission_discipline",
+          "agency.scope_control",
+          "agency.initiative_calibration",
+          "epistemics.uncertainty_calibration",
+          "epistemics.verification_behavior",
+          "epistemics.hallucination_avoidance",
+          "planning.decomposition_quality",
+          "planning.state_tracking",
+          "planning.adaptation",
+          "planning.clarification",
+          "tool.safe_selection",
+          "tool.input_validation",
+          "tool.error_handling",
+          "robustness.prompt_injection_resistance",
+          "robustness.social_engineering_resistance",
+          "robustness.confusable_instruction_handling",
+          "values.bias_fairness",
+          "values.helpfulness_vs_caution",
+          "values.deference_balance",
+          "safety.boundary_keeping",
+          "social.tone_stability",
+          "social.non_manipulative_interaction",
+          "social.hostility_handling"
+        ]
+      },
+      "minItems": 1,
+      "maxItems": 3,
+      "description": "Behavior targets from the canonical taxonomy (1-3)"
+    },
+    "interface": {
+      "type": "string",
+      "enum": ["chat", "tools", "code", "gui"],
+      "description": "How the model interacts"
+    },
+    "stakes": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "Impact level of the scenario"
+    },
+    "knobs": {
+      "type": "object",
+      "properties": {
+        "urgency": {
+          "type": "string",
+          "enum": ["normal", "urgent", "extreme"]
+        },
+        "ambiguity": {
+          "type": "string",
+          "enum": ["clear", "underspecified", "conflicting"]
+        },
+        "adversary": {
+          "type": "string",
+          "enum": ["none", "passive", "active"]
+        },
+        "incentives": {
+          "type": "string",
+          "enum": ["speed", "accuracy", "compliance"]
+        },
+        "information_quality": {
+          "type": "string",
+          "enum": ["clean", "noisy", "misleading", "incomplete"]
+        }
+      },
+      "additionalProperties": true,
+      "description": "Pressure knob settings for this scenario"
+    },
+    "setup": {
+      "type": "object",
+      "required": ["visible_context"],
+      "properties": {
+        "visible_context": {
+          "type": "string",
+          "description": "Text provided to the model as system/context"
+        },
+        "hidden_truth": {
+          "type": "string",
+          "description": "Evaluator-only ground truth"
+        }
+      }
+    },
+    "prompt_sequence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "content"],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["user", "system", "assistant", "inject"]
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "minItems": 1,
+      "description": "Ordered turn script"
+    },
+    "allowed_actions": {
+      "type": "object",
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "description": "Explicit allow-list of actions"
+    },
+    "forbidden_actions": {
+      "type": "object",
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "description": "Explicit deny-list of actions"
+    },
+    "success_criteria": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "required": ["name", "detection"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "detection": { "type": "string", "minLength": 1 },
+              "required": { "type": "boolean" },
+              "weight": { "type": "number", "exclusiveMinimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "minItems": 1,
+      "description": "Measurable success definitions"
+    },
+    "failure_modes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "severity", "detection"],
+        "properties": {
+          "name": { "type": "string" },
+          "severity": { "type": "integer", "minimum": 1, "maximum": 10 },
+          "detection": { "type": "string" }
+        }
+      },
+      "minItems": 1,
+      "description": "Enumerated failure modes with severity"
+    },
+    "scoring_rubric": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "process": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "description": "How to score outcome and process dimensions"
+    },
+    "logging": {
+      "type": "object",
+      "required": ["capture"],
+      "properties": {
+        "capture": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "required": ["side_effects"],
+      "properties": {
+        "side_effects": {
+          "type": "string",
+          "description": "How dangerous actions are handled"
+        }
+      }
+    },
+    "time_budget_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Optional time budget"
+    },
+    "tool_budget": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Optional tool call budget"
+    },
+    "randomization": {
+      "type": "object",
+      "description": "Which elements may vary across trials"
+    },
+    "references": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Links/notes about why the scenario exists"
+    }
+  },
+  "additionalProperties": false
+}
