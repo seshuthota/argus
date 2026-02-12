@@ -137,6 +137,189 @@
       "minItems": 1,
       "description": "Ordered turn script"
     },
+    "conversation": {
+      "type": "object",
+      "properties": {
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Scenario-specific turn budget (capped by runner max_turns)."
+        },
+        "user_mode": {
+          "type": "string",
+          "enum": ["scripted", "simulated"],
+          "description": "How user turns are provided after initial prompts."
+        },
+        "turn_policy": {
+          "type": "string",
+          "enum": [
+            "assistant_until_completion",
+            "alternating_user_assistant",
+            "assistant_tools_then_user"
+          ],
+          "description": "Conversation policy for runtime turn orchestration."
+        },
+        "stop_conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "assistant_response_contains",
+                  "assistant_response_matches_regex",
+                  "tool_call_count_gte",
+                  "turn_count_gte"
+                ]
+              },
+              "value": {
+                "oneOf": [
+                  { "type": "string" },
+                  { "type": "integer", "minimum": 0 }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "Optional multi-turn orchestration configuration."
+    },
+    "simulated_user": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["deterministic_template_v1"],
+          "description": "Deterministic simulated-user engine profile."
+        },
+        "profile": {
+          "type": "string",
+          "description": "Named persona/profile for simulated user behavior."
+        },
+        "objective": {
+          "type": "string",
+          "description": "Primary objective for simulated user replies."
+        },
+        "max_user_turns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "default_response": {
+          "type": "string"
+        },
+        "response_rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["when", "reply"],
+            "properties": {
+              "when": { "type": "string", "minLength": 1 },
+              "reply": { "type": "string", "minLength": 1 },
+              "priority": { "type": "integer", "minimum": 0 },
+              "once": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "Optional deterministic simulated-user behavior config."
+    },
+    "turn_assertions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "detection"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "detection": { "type": "string", "minLength": 1 },
+          "applies_to": {
+            "type": "string",
+            "enum": ["assistant", "user", "any"]
+          },
+          "turn_start": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "turn_end": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "weight": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Optional turn-window assertions for multi-turn scenarios."
+    },
+    "dynamic_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "trigger", "action"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string" },
+          "trigger": { "type": "string", "minLength": 1 },
+          "mode": {
+            "type": "string",
+            "enum": ["once", "repeat"]
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "action": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "inject_message",
+                  "update_knob",
+                  "restrict_tools",
+                  "terminate_run",
+                  "set_flag"
+                ]
+              },
+              "role": {
+                "type": "string",
+                "enum": ["system", "user", "assistant", "inject"]
+              },
+              "content": { "type": "string" },
+              "tool_names": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "knob_key": { "type": "string", "minLength": 1 },
+              "knob_value": {
+                "oneOf": [
+                  { "type": "string" },
+                  { "type": "number" },
+                  { "type": "boolean" }
+                ]
+              },
+              "flag": { "type": "string", "minLength": 1 },
+              "reason": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Optional runtime trigger-action events for dynamic scenario flow."
+    },
     "allowed_actions": {
       "type": "object",
       "properties": {

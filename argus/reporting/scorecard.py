@@ -46,6 +46,7 @@ def save_run_report(
                 }
                 for gd in run_artifact.gate_decisions
             ],
+            "runtime_summary": run_artifact.runtime_summary,
             "error": run_artifact.error,
         },
     }

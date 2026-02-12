@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 import re
 
@@ -805,6 +806,86 @@ def _normalize_success_criterion(item: Any, index: int) -> dict[str, Any]:
     }
 
 
+def _normalize_turn_assertion(item: Any, index: int) -> dict[str, Any]:
+    """Normalize a turn assertion into a predictable internal shape."""
+    if not isinstance(item, dict):
+        return {
+            "name": f"Turn assertion {index}",
+            "detection": None,
+            "applies_to": "assistant",
+            "turn_start": None,
+            "turn_end": None,
+            "required": True,
+            "weight": 1.0,
+        }
+
+    name = str(item.get("name") or f"Turn assertion {index}")
+    detection = item.get("detection")
+    if detection is not None:
+        detection = str(detection)
+    applies_to = str(item.get("applies_to", "assistant")).lower()
+    if applies_to not in ("assistant", "user", "any"):
+        applies_to = "assistant"
+
+    turn_start = item.get("turn_start")
+    if not isinstance(turn_start, int) or turn_start < 1:
+        turn_start = None
+    turn_end = item.get("turn_end")
+    if not isinstance(turn_end, int) or turn_end < 1:
+        turn_end = None
+
+    weight = float(item.get("weight", 1.0))
+    required = bool(item.get("required", True))
+    return {
+        "name": name,
+        "detection": detection,
+        "applies_to": applies_to,
+        "turn_start": turn_start,
+        "turn_end": turn_end,
+        "required": required,
+        "weight": weight if weight > 0 else 1.0,
+    }
+
+
+def _artifact_view_for_turn_assertion(
+    run_artifact: Any,
+    *,
+    applies_to: str,
+    turn_start: int | None,
+    turn_end: int | None,
+) -> Any:
+    """Create a filtered run-artifact-like view for turn-window evaluation."""
+    filtered_transcript: list[dict[str, Any]] = []
+    for msg in getattr(run_artifact, "transcript", []):
+        role = str(msg.get("role", "")).lower()
+        turn = msg.get("turn")
+        if isinstance(turn_start, int):
+            if not isinstance(turn, int) or turn < turn_start:
+                continue
+        if isinstance(turn_end, int):
+            if not isinstance(turn, int) or turn > turn_end:
+                continue
+        if applies_to != "any" and role != applies_to:
+            continue
+        filtered_transcript.append(msg)
+
+    filtered_tool_calls: list[dict[str, Any]] = []
+    for tc in getattr(run_artifact, "tool_calls", []):
+        turn = tc.get("turn")
+        if isinstance(turn_start, int):
+            if not isinstance(turn, int) or turn < turn_start:
+                continue
+        if isinstance(turn_end, int):
+            if not isinstance(turn, int) or turn > turn_end:
+                continue
+        filtered_tool_calls.append(tc)
+
+    return SimpleNamespace(
+        transcript=filtered_transcript,
+        tool_calls=filtered_tool_calls,
+    )
+
+
 def run_all_checks(
     run_artifact: Any,
     scenario: dict,
@@ -944,6 +1025,100 @@ def run_all_checks(
                     passed=not required,
                     severity=0,
                     details=f"Unmet success criterion: {name}",
+                    applicable=True,
+                    weight=weight,
+                    evidence=eval_result.evidence,
+                    confidence=eval_result.confidence,
+                    unsupported_clauses=eval_result.unsupported_clauses,
+                )
+            )
+
+    turn_assertions = scenario.get("turn_assertions", [])
+    for idx, raw_item in enumerate(turn_assertions, start=1):
+        assertion = _normalize_turn_assertion(raw_item, idx)
+        name = assertion["name"]
+        detection = assertion.get("detection")
+        required = assertion.get("required", True)
+        weight = float(assertion.get("weight", 1.0))
+        applies_to = assertion.get("applies_to", "assistant")
+        turn_start = assertion.get("turn_start")
+        turn_end = assertion.get("turn_end")
+        check_name = f"turn_assertion.{_normalize_check_name(name).split('.', 1)[1]}"
+
+        if not detection:
+            checks.append(
+                CheckResult(
+                    name=check_name,
+                    kind="success",
+                    passed=True,
+                    severity=0,
+                    details=f"No machine-checkable detection for turn assertion: {name}",
+                    applicable=False,
+                    weight=weight,
+                    evidence=None,
+                    confidence=0.8,
+                )
+            )
+            continue
+
+        filtered_view = _artifact_view_for_turn_assertion(
+            run_artifact,
+            applies_to=applies_to,
+            turn_start=turn_start,
+            turn_end=turn_end,
+        )
+        eval_result = _evaluate_detection_expression(str(detection), filtered_view)
+        if eval_result.unsupported_clauses:
+            unsupported_clauses_seen.extend(eval_result.unsupported_clauses)
+
+        window_desc_parts: list[str] = []
+        if isinstance(turn_start, int):
+            window_desc_parts.append(f"turn_start={turn_start}")
+        if isinstance(turn_end, int):
+            window_desc_parts.append(f"turn_end={turn_end}")
+        window_desc_parts.append(f"applies_to={applies_to}")
+        window_desc = ", ".join(window_desc_parts)
+
+        if not eval_result.applicable:
+            checks.append(
+                CheckResult(
+                    name=check_name,
+                    kind="success",
+                    passed=True,
+                    severity=0,
+                    details=f"Not applicable turn assertion: {name} ({window_desc})",
+                    applicable=False,
+                    weight=weight,
+                    evidence=eval_result.evidence,
+                    confidence=eval_result.confidence,
+                    unsupported_clauses=eval_result.unsupported_clauses,
+                )
+            )
+            continue
+
+        if eval_result.matched:
+            checks.append(
+                CheckResult(
+                    name=check_name,
+                    kind="success",
+                    passed=True,
+                    severity=0,
+                    details=f"Satisfied turn assertion: {name} ({window_desc})",
+                    applicable=True,
+                    weight=weight,
+                    evidence=eval_result.evidence,
+                    confidence=eval_result.confidence,
+                    unsupported_clauses=eval_result.unsupported_clauses,
+                )
+            )
+        else:
+            checks.append(
+                CheckResult(
+                    name=check_name,
+                    kind="success",
+                    passed=not required,
+                    severity=0,
+                    details=f"Unmet turn assertion: {name} ({window_desc})",
                     applicable=True,
                     weight=weight,
                     evidence=eval_result.evidence,

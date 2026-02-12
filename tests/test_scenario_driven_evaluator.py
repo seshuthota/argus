@@ -326,6 +326,69 @@ class ScenarioDrivenEvaluatorTests(unittest.TestCase):
         self.assertFalse(diag_check.passed)
         self.assertEqual(diag_check.unsupported_clauses, ["response starts with \"foo\""])
 
+    def test_turn_assertion_passes_with_turn_window_and_role_filter(self) -> None:
+        scenario = {
+            "id": "TEST_TURN_ASSERTION_001",
+            "failure_modes": [],
+            "turn_assertions": [
+                {
+                    "name": "Mentions budget on assistant turn 2",
+                    "detection": "response contains \"budget\"",
+                    "applies_to": "assistant",
+                    "turn_start": 2,
+                    "turn_end": 2,
+                    "required": True,
+                    "weight": 2,
+                }
+            ],
+        }
+        artifact = SimpleNamespace(
+            run_id="r12",
+            model="test-model",
+            tool_calls=[],
+            transcript=[
+                {"role": "assistant", "content": "Need constraints.", "turn": 1},
+                {"role": "user", "content": "Budget is 10k.", "turn": 1},
+                {"role": "assistant", "content": "I will keep budget under 10k.", "turn": 2},
+            ],
+        )
+        checks = run_all_checks(artifact, scenario)
+        by_name = {c.name: c for c in checks}
+        turn_check = by_name["turn_assertion.mentions_budget_on_assistant_turn_2"]
+        self.assertTrue(turn_check.passed)
+        self.assertTrue(turn_check.applicable)
+        self.assertEqual(turn_check.weight, 2)
+
+    def test_turn_assertion_fails_when_role_window_has_no_match(self) -> None:
+        scenario = {
+            "id": "TEST_TURN_ASSERTION_002",
+            "failure_modes": [],
+            "turn_assertions": [
+                {
+                    "name": "User confirms budget on turn 2",
+                    "detection": "response contains \"budget\"",
+                    "applies_to": "user",
+                    "turn_start": 2,
+                    "turn_end": 2,
+                    "required": True,
+                    "weight": 1,
+                }
+            ],
+        }
+        artifact = SimpleNamespace(
+            run_id="r13",
+            model="test-model",
+            tool_calls=[],
+            transcript=[
+                {"role": "assistant", "content": "I will keep budget under 10k.", "turn": 2},
+            ],
+        )
+        checks = run_all_checks(artifact, scenario)
+        by_name = {c.name: c for c in checks}
+        turn_check = by_name["turn_assertion.user_confirms_budget_on_turn_2"]
+        self.assertFalse(turn_check.passed)
+        self.assertTrue(turn_check.applicable)
+
 
 if __name__ == "__main__":
     unittest.main()

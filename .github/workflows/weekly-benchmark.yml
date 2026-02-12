@@ -1,0 +1,127 @@
+name: Weekly Argus Benchmark
+
+on:
+  schedule:
+    # Every Sunday at 03:00 UTC
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      trials:
+        description: "Trials per scenario"
+        required: false
+        default: "1"
+      profile:
+        description: "Gate profile (baseline|candidate|release|custom)"
+        required: false
+        default: "candidate"
+      scenario_list:
+        description: "Scenario list file path"
+        required: false
+        default: "scenarios/suites/sabotage_extended_v1.txt"
+      matrix_scenario_list:
+        description: "Scenario list for benchmark-matrix"
+        required: false
+        default: "scenarios/suites/complex_behavior_v1.txt"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: read
+
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+      OPENROUTER_SITE_URL: ${{ vars.OPENROUTER_SITE_URL }}
+      OPENROUTER_APP_NAME: ${{ vars.OPENROUTER_APP_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify required secrets
+        run: |
+          if [ -z "${OPENROUTER_API_KEY}" ]; then
+            echo "Missing required secret: OPENROUTER_API_KEY"
+            exit 1
+          fi
+          if [ -z "${MINIMAX_API_KEY}" ]; then
+            echo "Missing required secret: MINIMAX_API_KEY"
+            exit 1
+          fi
+
+      - name: Run benchmark pipeline
+        run: |
+          TRIALS="${{ github.event.inputs.trials || '1' }}"
+          PROFILE="${{ github.event.inputs.profile || 'candidate' }}"
+          SCENARIO_LIST="${{ github.event.inputs.scenario_list || 'scenarios/suites/sabotage_extended_v1.txt' }}"
+          python -m argus.cli benchmark-pipeline \
+            --scenario-list "${SCENARIO_LIST}" \
+            --trials "${TRIALS}" \
+            --seed 42 \
+            --max-turns 6 \
+            --profile "${PROFILE}" \
+            --output-dir reports/suites \
+            --trends-dir reports/suites/trends
+
+      - name: Generate trend report
+        run: |
+          python -m argus.cli trend-report \
+            --trend-dir reports/suites/trends \
+            --window 12 \
+            --output reports/suites/trends/weekly_trend_report.md
+
+      - name: Run benchmark matrix
+        run: |
+          TRIALS="${{ github.event.inputs.trials || '1' }}"
+          PROFILE="${{ github.event.inputs.profile || 'candidate' }}"
+          MATRIX_SCENARIO_LIST="${{ github.event.inputs.matrix_scenario_list || 'scenarios/suites/complex_behavior_v1.txt' }}"
+          python -m argus.cli benchmark-matrix \
+            --scenario-list "${MATRIX_SCENARIO_LIST}" \
+            --models MiniMax-M2.1 \
+            --models stepfun/step-3.5-flash:free \
+            --trials "${TRIALS}" \
+            --seed 42 \
+            --max-turns 6 \
+            --profile "${PROFILE}" \
+            --output-dir reports/suites \
+            --trends-dir reports/suites/trends
+
+      - name: Generate suite and matrix visuals
+        run: |
+          find reports/suites -maxdepth 1 -name '*.json' -print0 | while IFS= read -r -d '' suite_json; do
+            python -m argus.cli visualize-suite --suite-report "$suite_json" --output-dir reports/visuals
+          done
+          LATEST_MATRIX="$(ls -1t reports/suites/matrix/*_matrix.json | head -n1)"
+          python -m argus.cli visualize-matrix \
+            --matrix-json "${LATEST_MATRIX}" \
+            --trend-dir reports/suites/trends \
+            --window 12 \
+            --output-dir reports/visuals
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: argus-benchmark-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            reports/suites/*.json
+            reports/suites/comparisons/*.md
+            reports/suites/gates/*.json
+            reports/suites/matrix/**/*.json
+            reports/suites/matrix/**/*.md
+            reports/suites/trends/*.jsonl
+            reports/suites/trends/*.md
+            reports/visuals/**/*.svg
+            reports/visuals/**/*.json

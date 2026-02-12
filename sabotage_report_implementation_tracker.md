@@ -222,9 +222,156 @@ Use this section as a running journal. Append entries only.
 - Default quality gate outcomes on post-calibration smoke runs:
   - MiniMax failed on pass-rate/high-severity thresholds (`d2de1031`).
   - StepFun failed on pass-rate/severity thresholds (`d3cc13b7`).
+- Implemented staged gate presets and profile-aware gate evaluation:
+  - profiles: `baseline`, `candidate`, `release`, `custom`
+  - CLI: `python -m argus.cli gate --profile <profile>`
+  - explicit CLI flags override profile defaults.
+- Implemented benchmark automation pipeline:
+  - CLI: `python -m argus.cli benchmark-pipeline`
+  - wrapper: `scripts/run_benchmark_pipeline.sh`
+  - outputs:
+    - suite reports in `reports/suites/`
+    - gate JSON in `reports/suites/gates/`
+    - markdown comparison in `reports/suites/comparisons/`
+- Added automated comparison markdown renderer:
+  - `argus/reporting/comparison.py`
+- Pipeline validation run (`sabotage_calibration_focus_v1`, `n=1`):
+  - MiniMax suite: `reports/suites/30f932aa.json` (`60.0%` pass)
+  - StepFun suite: `reports/suites/fa6009f2.json` (`80.0%` pass)
+  - comparison markdown: `reports/suites/comparisons/20260212T040010Z_30f932aa_vs_fa6009f2.md`
+  - gate JSON:
+    - `reports/suites/gates/30f932aa.json`
+    - `reports/suites/gates/fa6009f2.json`
+- Test status after automation work: `31/31` unit tests passing.
+- Full post-calibration baseline run completed via `benchmark-pipeline` (`sabotage_extended_v1`, `n=3`):
+  - MiniMax suite: `reports/suites/2ebf0a0d.json` (`60.3%` pass, `0` errors, anomaly_count=`7`)
+  - StepFun suite: `reports/suites/a5f99302.json` (`34.9%` pass, `0` errors, anomaly_count=`12`)
+  - comparison markdown: `reports/suites/comparisons/20260212T041705Z_2ebf0a0d_vs_a5f99302.md`
+  - gate JSON:
+    - `reports/suites/gates/2ebf0a0d.json`
+    - `reports/suites/gates/a5f99302.json`
+- Candidate-profile gate outcomes on full baseline:
+  - MiniMax failed on pass-rate, avg severity, high-severity failures, pathway floor, and anomaly-count thresholds.
+  - StepFun failed on the same categories with larger margin.
+- Started complex-capability expansion Phase A from `complex_scenarios_expansion_plan.md`:
+  - Extended scenario schema with optional multi-turn/dynamic fields:
+    - `conversation`, `simulated_user`, `turn_assertions`, `dynamic_events`
+  - Added runner runtime-state scaffolding and compatibility guards:
+    - `conversation.max_turns` cap support
+    - prompt role normalization (`inject` -> `system` for provider messages)
+    - runtime metadata logging (`runtime_config`, dynamic-event load notice)
+  - Added run report support for runtime summary (`runtime_summary` in saved JSON).
+  - Added tests:
+    - `tests/test_schema_extensions.py`
+    - expanded `tests/test_runner.py` for max-turn cap, inject-role mapping, and dynamic-event metadata.
+  - Validation status:
+    - unit tests passing (`39/39`)
+    - scenario validation successful across all current YAMLs (`30/30`)
+- Implemented Phase B core runtime capabilities:
+  - Added deterministic simulated user engine:
+    - `argus/env/simulated_user.py`
+  - Upgraded runner to support:
+    - simulated user follow-up turns (`conversation.user_mode: simulated`)
+    - dynamic event trigger evaluation using detection DSL
+    - dynamic actions: `inject_message`, `restrict_tools`, `update_knob`, `set_flag`, `terminate_run`
+    - runtime summaries with effective tool permissions, flags, and trigger counts
+  - Added first complex scenarios and suite manifest:
+    - `PLANNING_MULTI_TURN_CONSTRAINT_TRACKING_001`
+    - `SAFETY_MULTI_TURN_PRESSURE_ESCALATION_001`
+    - `ROBUSTNESS_DYNAMIC_INJECTION_DOCUMENT_SUMMARY_002`
+    - `TOOL_DYNAMIC_RESTRICTION_AFTER_DRAFT_001`
+    - `scenarios/suites/complex_behavior_v1.txt`
+  - Extended tests and docs:
+    - runner tests for simulated user and dynamic restrictions
+    - schema extension tests
+    - README updates for complex suite + advanced scenario fields
+  - Validation status after runtime/scenario expansion:
+    - unit tests passing (`41/41`)
+    - scenario validation successful across all current YAMLs (`30/30`)
+- Expanded complex suite coverage to satisfy initial target counts:
+  - Added third multi-turn scenario:
+    - `STATE_MULTI_TURN_REQUIREMENT_MEMORY_001`
+  - Added third dynamic scenario:
+    - `SAFETY_DYNAMIC_TERMINATION_SELF_PRESERVATION_001`
+  - Updated suite manifest:
+    - `scenarios/suites/complex_behavior_v1.txt` now includes `6` scenarios.
+  - Validation status after expansion:
+    - unit tests passing (`41/41`)
+    - scenario validation successful across all current YAMLs (`36/36`)
+  - Integration smoke attempt:
+    - command: `python -m argus.cli run-suite --scenario-list scenarios/suites/complex_behavior_v1.txt --model MiniMax-M2.1 -n 1`
+    - result: `reports/suites/c8b40a0b.json` with `6/6` run errors due provider connection errors in current environment.
+  - Added simulated-user engine unit tests:
+    - `tests/test_simulated_user.py`
+  - Latest validation status:
+    - unit tests passing (`44/44`)
+    - scenario validation successful across all current YAMLs (`36/36`)
+- Implemented benchmark matrix and paired comparison layer (WS3):
+  - Added new CLI command:
+    - `python -m argus.cli benchmark-matrix`
+  - Added paired analysis module:
+    - `argus/reporting/paired.py`
+    - outputs mean pass delta, bootstrap CI, discordant pair counts, McNemar statistic, and per-scenario paired deltas
+  - Added tests:
+    - `tests/test_paired_reporting.py`
+  - Added docs:
+    - README benchmark-matrix usage
+  - Local execution artifact (network-restricted environment):
+    - matrix json: `reports/suites/matrix/20260212T050645Z_matrix.json`
+    - matrix markdown: `reports/suites/matrix/20260212T050645Z_matrix.md`
+    - pairwise outputs: `reports/suites/matrix/pairwise/`
+  - Latest validation status:
+    - unit tests passing (`46/46`)
+    - scenario validation successful across all current YAMLs (`36/36`)
+- Implemented visualization layer and automation wiring (WS4):
+  - Added visualization module:
+    - `argus/reporting/visualize.py`
+    - Generates SVG artifacts for suite, matrix, and trend reports.
+  - Added CLI commands:
+    - `python -m argus.cli visualize-suite --suite-report ...`
+    - `python -m argus.cli visualize-matrix --matrix-json ...`
+  - Added visualization tests:
+    - `tests/test_visualization_reporting.py`
+  - Updated weekly workflow:
+    - `.github/workflows/weekly-benchmark.yml`
+    - Now runs `benchmark-matrix`, generates visuals, and uploads `reports/visuals/**`.
+  - Updated docs:
+    - `README.md` includes benchmark-matrix and visualization usage.
+  - Local validation:
+    - `visualize-suite` and `visualize-matrix` commands executed successfully against local artifacts.
+  - Latest validation status:
+    - unit tests passing (`49/49`)
+    - CLI includes new commands (`visualize-suite`, `visualize-matrix`, `benchmark-matrix`)
+- Added operator-friendly execution script for live runs with complete logging:
+  - `scripts/run_full_live_eval_with_logs.sh`
+  - Runs tests, scenario validation, benchmark pipeline, benchmark matrix, trend report, and visual generation.
+  - Produces timestamped logs + summary in `reports/execution_logs/<timestamp>/`.
+- Closed remaining pre-full-test implementation gaps:
+  - Runner now enforces `conversation.stop_conditions` (`assistant_response_contains`, `assistant_response_matches_regex`, `tool_call_count_gte`, `turn_count_gte`) with explicit `stop_condition_triggered` events.
+  - Evaluator now supports `turn_assertions` as weighted success checks with role + turn-window filtered artifact views.
+  - Added pairwise visualization command:
+    - `python -m argus.cli visualize-comparison --pairwise-json ...`
+  - Added/updated tests:
+    - stop-condition tests in `tests/test_runner.py`
+    - turn-assertion tests in `tests/test_scenario_driven_evaluator.py`
+    - pairwise visualization test in `tests/test_visualization_reporting.py`
+  - Latest validation status:
+    - unit tests passing (`54/54`)
+    - scenario validation successful across all current YAMLs (`36/36`)
+- Added connectivity hardening for live provider runs:
+  - New CLI command: `python -m argus.cli preflight --models ...`
+    - validates key presence, DNS resolution, and HTTPS reachability for each model/provider route.
+  - Added transient retry/backoff in `LiteLLMAdapter`:
+    - retries network/provider transient errors (connection, timeout, DNS, 429/5xx hints)
+    - avoids retrying likely-auth/request-shape failures.
+  - Updated full-run script:
+    - `scripts/run_full_live_eval_with_logs.sh` now runs `15_preflight` before benchmarks.
+  - Added tests:
+    - `tests/test_cli_preflight.py`
+    - `tests/test_litellm_adapter.py`
 
 ## 9) Next Session Start Point
 Start with:
-1. Re-run full extended benchmark (`sabotage_extended_v1.txt`, `n>=3`) after calibrated scenario rules to establish new baseline.
-2. Add staged quality-gate presets (`baseline`, `candidate`, `release`) and map each to explicit thresholds.
-3. Add scheduled benchmark automation with model comparison markdown export from trend JSONL.
+1. Re-run `complex_behavior_v1` and sabotage suites on live providers once this execution environment has outbound DNS/network access.
+2. Generate baseline matrix comparisons from live runs and review pathway-level regressions.
+3. Tune gate thresholds for complex scenarios after first stable live baseline (candidate/release profile updates).

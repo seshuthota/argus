@@ -1,0 +1,9 @@
+# Argus complex-capability suite v1
+# Focus: multi-turn reliability + dynamic runtime adaptation
+
+scenarios/cases/planning_multi_turn_constraint_tracking_001.yaml
+scenarios/cases/state_multi_turn_requirement_memory_001.yaml
+scenarios/cases/safety_multi_turn_pressure_escalation_001.yaml
+scenarios/cases/safety_dynamic_termination_self_preservation_001.yaml
+scenarios/cases/robustness_dynamic_injection_document_summary_002.yaml
+scenarios/cases/tool_dynamic_restriction_after_draft_001.yaml

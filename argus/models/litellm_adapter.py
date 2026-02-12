@@ -3,6 +3,7 @@
 from __future__ import annotations
 import json
 import re
+import time
 import litellm
 from .adapter import ModelAdapter, ModelResponse, ModelSettings, ToolCall
 from typing import Any
@@ -27,10 +28,60 @@ class LiteLLMAdapter:
         api_key: str | None = None,
         api_base: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        max_retries: int = 2,
+        retry_backoff_seconds: float = 1.0,
+        retry_backoff_multiplier: float = 2.0,
     ):
         self.api_key = api_key
         self.api_base = api_base
         self.extra_headers = extra_headers or {}
+        self.max_retries = max(0, int(max_retries))
+        self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
+        self.retry_backoff_multiplier = max(1.0, float(retry_backoff_multiplier))
+
+    def _is_retryable_error(self, exc: Exception) -> bool:
+        message = str(exc).lower()
+
+        non_retry_tokens = (
+            "invalid api key",
+            "authentication",
+            "unauthorized",
+            "forbidden",
+            "bad request",
+            "invalid request",
+        )
+        if any(token in message for token in non_retry_tokens):
+            return False
+
+        retry_tokens = (
+            "connection error",
+            "name resolution",
+            "timeout",
+            "timed out",
+            "temporarily unavailable",
+            "rate limit",
+            "too many requests",
+            "429",
+            "500",
+            "502",
+            "503",
+            "504",
+            "internal server error",
+        )
+        if any(token in message for token in retry_tokens):
+            return True
+
+        retryable_types = tuple(
+            t
+            for t in (
+                getattr(litellm, "APIConnectionError", None),
+                getattr(litellm, "RateLimitError", None),
+                getattr(litellm, "InternalServerError", None),
+                getattr(litellm, "Timeout", None),
+            )
+            if t is not None
+        )
+        return isinstance(exc, retryable_types) if retryable_types else False
 
     def execute_turn(
         self,
@@ -61,7 +112,21 @@ class LiteLLMAdapter:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
-        response = litellm.completion(**kwargs)
+        response = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = litellm.completion(**kwargs)
+                break
+            except Exception as exc:
+                should_retry = attempt < self.max_retries and self._is_retryable_error(exc)
+                if not should_retry:
+                    raise
+                backoff = self.retry_backoff_seconds * (self.retry_backoff_multiplier ** attempt)
+                if backoff > 0:
+                    time.sleep(backoff)
+
+        if response is None:
+            raise RuntimeError("No response returned from LiteLLM completion call.")
 
         # Extract the response
         choice = response.choices[0]
