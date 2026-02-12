@@ -39,6 +39,7 @@ from .reporting.suite import (
     append_suite_trend,
 )
 from .reporting.gates import evaluate_suite_quality_gates
+from .reporting.feedback import load_misdetection_flags, apply_misdetection_flags
 from .reporting.gate_profiles import GATE_PROFILES
 from .reporting.comparison import build_suite_comparison_markdown
 from .reporting.trends import load_trend_entries, build_trend_markdown
@@ -956,6 +957,8 @@ def _resolved_gate_kwargs(
     max_total_unsupported_detections: int,
     max_cross_trial_anomalies: int | None,
     anomaly_scenario_regex: str | None,
+    max_human_flagged_misdetections: int | None,
+    ignore_human_flagged_checks: bool,
 ) -> dict[str, Any]:
     """
     Resolve final gate kwargs from profile plus optional CLI overrides.
@@ -981,6 +984,8 @@ def _resolved_gate_kwargs(
         "max_total_unsupported_detections": max_total_unsupported_detections,
         "max_cross_trial_anomalies": max_cross_trial_anomalies,
         "anomaly_scenario_regex": anomaly_scenario_regex,
+        "max_human_flagged_misdetections": max_human_flagged_misdetections,
+        "ignore_human_flagged_checks": ignore_human_flagged_checks,
     }
 
     if profile == "custom":
@@ -1455,6 +1460,54 @@ def run_suite(
         console.print("[yellow]![/yellow] Some runs errored; inspect suite report for details.")
 
 
+@cli.command("annotate-suite")
+@click.option(
+    "--suite-report",
+    "suite_report_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Suite report JSON path to annotate.",
+)
+@click.option(
+    "--flags",
+    "flags_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="YAML/JSON file containing human mis-detection flags.",
+)
+@click.option(
+    "--output",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Output suite report path. Defaults to <suite>.annotated.json.",
+)
+def annotate_suite(
+    suite_report_path: str,
+    flags_path: str,
+    output: str | None,
+):
+    """Apply human mis-detection flags to a suite report."""
+    with open(suite_report_path) as f:
+        suite_report = json.load(f)
+
+    flags = load_misdetection_flags(flags_path)
+    annotated, stats = apply_misdetection_flags(suite_report, flags)
+
+    source = Path(suite_report_path)
+    out = Path(output) if output else source.with_name(f"{source.stem}.annotated.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(annotated, indent=2))
+
+    console.print("\n[cyan]⚡ Argus Suite Annotation[/cyan]")
+    console.print(f"  Source: {source}")
+    console.print(f"  Flags: {flags_path}")
+    console.print(f"  Submitted flags: {stats['flags_submitted']}")
+    console.print(f"  Applied flags: {stats['flags_applied']}")
+    console.print(f"  Unmatched flags: {stats['flags_unmatched']}")
+    console.print(f"  Flagged checks total: {stats['flagged_checks_total']}")
+    console.print(f"[green]✓[/green] Annotated suite saved: {out}")
+
+
 @cli.command()
 @click.argument("run_id")
 @click.option("--reports-dir", default="reports/runs", help="Reports directory")
@@ -1497,6 +1550,19 @@ def report(run_id: str, reports_dir: str):
 @click.option("--max-cross-trial-anomalies", default=None, type=int, help="Optional max allowed cross-trial anomalies")
 @click.option("--anomaly-scenario-regex", default=None, help="Optional regex filter for anomaly scenario IDs")
 @click.option(
+    "--misdetection-flags",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Optional YAML/JSON flags to annotate checks before gating.",
+)
+@click.option("--max-human-flagged-misdetections", default=None, type=int, help="Optional max allowed human-flagged checks")
+@click.option(
+    "--ignore-human-flagged-checks/--count-human-flagged-checks",
+    default=False,
+    show_default=True,
+    help="Exclude human-flagged checks from high-severity/unsupported gate counts.",
+)
+@click.option(
     "--profile",
     type=click.Choice(["baseline", "candidate", "release", "custom"]),
     default="baseline",
@@ -1516,9 +1582,14 @@ def gate(
     max_total_unsupported_detections: int,
     max_cross_trial_anomalies: int | None,
     anomaly_scenario_regex: str | None,
+    misdetection_flags: str | None,
+    max_human_flagged_misdetections: int | None,
+    ignore_human_flagged_checks: bool,
     profile: str,
 ):
     """Evaluate release quality gates against a suite report."""
+    feedback_flags = load_misdetection_flags(misdetection_flags) if misdetection_flags else None
+
     gate_kwargs = _resolved_gate_kwargs(
         ctx=ctx,
         profile=profile,
@@ -1531,6 +1602,8 @@ def gate(
         max_total_unsupported_detections=max_total_unsupported_detections,
         max_cross_trial_anomalies=max_cross_trial_anomalies,
         anomaly_scenario_regex=anomaly_scenario_regex,
+        max_human_flagged_misdetections=max_human_flagged_misdetections,
+        ignore_human_flagged_checks=ignore_human_flagged_checks,
     )
 
     if gate_kwargs["min_pass_rate"] < 0 or gate_kwargs["min_pass_rate"] > 1:
@@ -1556,6 +1629,9 @@ def gate(
     if gate_kwargs["max_cross_trial_anomalies"] is not None and gate_kwargs["max_cross_trial_anomalies"] < 0:
         console.print("[red]✗ --max-cross-trial-anomalies must be >= 0[/red]")
         sys.exit(1)
+    if gate_kwargs["max_human_flagged_misdetections"] is not None and gate_kwargs["max_human_flagged_misdetections"] < 0:
+        console.print("[red]✗ --max-human-flagged-misdetections must be >= 0[/red]")
+        sys.exit(1)
     if gate_kwargs["anomaly_scenario_regex"] is not None:
         try:
             re.compile(gate_kwargs["anomaly_scenario_regex"])
@@ -1565,6 +1641,14 @@ def gate(
 
     with open(suite_report_path) as f:
         suite_report = json.load(f)
+
+    if feedback_flags is not None:
+        suite_report, stats = apply_misdetection_flags(suite_report, feedback_flags)
+        console.print(
+            "  [dim]Applied mis-detection feedback: "
+            f"submitted={stats['flags_submitted']} applied={stats['flags_applied']} "
+            f"unmatched={stats['flags_unmatched']} flagged_checks={stats['flagged_checks_total']}[/dim]"
+        )
 
     result = evaluate_suite_quality_gates(
         suite_report,
@@ -1602,7 +1686,8 @@ def gate(
         f"high_severity_failures={metrics.get('high_severity_failures', 0)}, "
         f"errors={metrics.get('errored_runs', 0)}, "
         f"unsupported_detections={metrics.get('total_unsupported_detections', 0)}, "
-        f"cross_trial_anomalies={metrics.get('cross_trial_anomalies', 0)}"
+        f"cross_trial_anomalies={metrics.get('cross_trial_anomalies', 0)}, "
+        f"human_flagged_misdetections={metrics.get('human_flagged_misdetections', 0)}"
     )
 
     if result["passed"]:
@@ -1833,6 +1918,19 @@ def visualize_comparison(
 @click.option("--max-total-unsupported-detections", default=0, type=int, show_default=True)
 @click.option("--max-cross-trial-anomalies", default=None, type=int, help="Optional max allowed cross-trial anomalies")
 @click.option("--anomaly-scenario-regex", default=None, help="Optional regex filter for anomaly scenario IDs")
+@click.option(
+    "--misdetection-flags",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Optional YAML/JSON flags to annotate checks before gate evaluation.",
+)
+@click.option("--max-human-flagged-misdetections", default=None, type=int, help="Optional max allowed human-flagged checks")
+@click.option(
+    "--ignore-human-flagged-checks/--count-human-flagged-checks",
+    default=False,
+    show_default=True,
+    help="Exclude human-flagged checks from high-severity/unsupported gate counts.",
+)
 @click.option("--fail-on-gate/--no-fail-on-gate", default=False, show_default=True)
 @click.pass_context
 def benchmark_pipeline(
@@ -1863,9 +1961,14 @@ def benchmark_pipeline(
     max_total_unsupported_detections: int,
     max_cross_trial_anomalies: int | None,
     anomaly_scenario_regex: str | None,
+    misdetection_flags: str | None,
+    max_human_flagged_misdetections: int | None,
+    ignore_human_flagged_checks: bool,
     fail_on_gate: bool,
 ):
     """Run both models on a suite, apply gates, and emit a markdown comparison report."""
+    feedback_flags = load_misdetection_flags(misdetection_flags) if misdetection_flags else None
+
     if trials < 1:
         console.print("[red]✗ --trials must be >= 1[/red]")
         sys.exit(1)
@@ -1899,6 +2002,8 @@ def benchmark_pipeline(
         max_total_unsupported_detections=max_total_unsupported_detections,
         max_cross_trial_anomalies=max_cross_trial_anomalies,
         anomaly_scenario_regex=anomaly_scenario_regex,
+        max_human_flagged_misdetections=max_human_flagged_misdetections,
+        ignore_human_flagged_checks=ignore_human_flagged_checks,
     )
 
     console.print("\n[cyan]⚡ Argus Benchmark Pipeline[/cyan]")
@@ -1949,6 +2054,15 @@ def benchmark_pipeline(
     print_suite_summary(suite_b)
     console.print(f"[green]✓[/green] Suite B report saved: {suite_path_b}")
     console.print(f"[green]✓[/green] Suite B trend updated: {trend_path_b}")
+
+    if feedback_flags is not None:
+        suite_a, stats_a = apply_misdetection_flags(suite_a, feedback_flags)
+        suite_b, stats_b = apply_misdetection_flags(suite_b, feedback_flags)
+        console.print(
+            "  [dim]Applied feedback flags: "
+            f"A(applied={stats_a['flags_applied']}, unmatched={stats_a['flags_unmatched']}) "
+            f"B(applied={stats_b['flags_applied']}, unmatched={stats_b['flags_unmatched']})[/dim]"
+        )
 
     gate_a = evaluate_suite_quality_gates(suite_a, **gate_kwargs)
     gate_b = evaluate_suite_quality_gates(suite_b, **gate_kwargs)
@@ -2037,6 +2151,19 @@ def benchmark_pipeline(
 @click.option("--max-total-unsupported-detections", default=0, type=int, show_default=True)
 @click.option("--max-cross-trial-anomalies", default=None, type=int, help="Optional max allowed cross-trial anomalies")
 @click.option("--anomaly-scenario-regex", default=None, help="Optional regex filter for anomaly scenario IDs")
+@click.option(
+    "--misdetection-flags",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Optional YAML/JSON flags to annotate checks before gate evaluation.",
+)
+@click.option("--max-human-flagged-misdetections", default=None, type=int, help="Optional max allowed human-flagged checks")
+@click.option(
+    "--ignore-human-flagged-checks/--count-human-flagged-checks",
+    default=False,
+    show_default=True,
+    help="Exclude human-flagged checks from high-severity/unsupported gate counts.",
+)
 @click.option("--fail-on-gate/--no-fail-on-gate", default=False, show_default=True)
 @click.pass_context
 def benchmark_matrix(
@@ -2065,9 +2192,14 @@ def benchmark_matrix(
     max_total_unsupported_detections: int,
     max_cross_trial_anomalies: int | None,
     anomaly_scenario_regex: str | None,
+    misdetection_flags: str | None,
+    max_human_flagged_misdetections: int | None,
+    ignore_human_flagged_checks: bool,
     fail_on_gate: bool,
 ):
     """Run a model matrix on the same scenario/seed schedule and emit paired comparisons."""
+    feedback_flags = load_misdetection_flags(misdetection_flags) if misdetection_flags else None
+
     if len(models) < 2:
         console.print("[red]✗ Provide at least two --models values[/red]")
         sys.exit(1)
@@ -2103,6 +2235,8 @@ def benchmark_matrix(
         max_total_unsupported_detections=max_total_unsupported_detections,
         max_cross_trial_anomalies=max_cross_trial_anomalies,
         anomaly_scenario_regex=anomaly_scenario_regex,
+        max_human_flagged_misdetections=max_human_flagged_misdetections,
+        ignore_human_flagged_checks=ignore_human_flagged_checks,
     )
 
     console.print("\n[cyan]⚡ Argus Benchmark Matrix[/cyan]")
@@ -2131,6 +2265,12 @@ def benchmark_matrix(
             trends_dir=trends_dir,
             fail_fast=False,
         )
+        if feedback_flags is not None:
+            suite_report, stats = apply_misdetection_flags(suite_report, feedback_flags)
+            console.print(
+                "  [dim]Applied feedback flags: "
+                f"applied={stats['flags_applied']} unmatched={stats['flags_unmatched']}[/dim]"
+            )
         gate = evaluate_suite_quality_gates(suite_report, **gate_kwargs)
         print_suite_summary(suite_report)
         console.print(f"[green]✓[/green] Suite report saved: {suite_path}")

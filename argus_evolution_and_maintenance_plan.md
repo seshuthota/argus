@@ -75,8 +75,8 @@
 - **Logic:** v1 lowers confidence for broad regex patterns (e.g., `.*`, short generic patterns, heavy wildcards) and continues to lower confidence when unsupported clauses are present.
 
 ### 4.2 Human-in-the-Loop Feedback
-- **Task:** Add a `mis-detection` flag to the suite report schema.
-- **Details:** Allow human auditors to flag specific check results for review, feeding back into DSL/regex improvements.
+- **Task:** Add a `mis-detection` flag to the suite report schema. [Implemented]
+- **Details:** Human auditors can flag specific check results using YAML/JSON inputs. Flags are attached to checks and surfaced in suite summaries and quality-gate metrics to support reviewer-aware release decisions.
 
 ---
 
@@ -127,9 +127,25 @@ Completed:
   - `docs/cookbook/pivot.md`
   - `docs/cookbook/pressure.md`
   - `docs/cookbook/trap.md`
+- Human-in-the-loop mis-detection feedback implemented:
+  - Module: `argus/reporting/feedback.py`
+  - CLI command: `python -m argus.cli annotate-suite --suite-report ... --flags ...`
+  - Gate flow integration:
+    - `argus.cli gate --misdetection-flags ...`
+    - `argus.cli benchmark-pipeline --misdetection-flags ...`
+    - `argus.cli benchmark-matrix --misdetection-flags ...`
+    - Optional gate controls:
+      - `--max-human-flagged-misdetections`
+      - `--ignore-human-flagged-checks`
+  - Quality gate evaluator supports reviewer-aware counting for high-severity and unsupported detections.
+  - Tests added:
+    - `tests/test_feedback_reporting.py`
+    - updated `tests/test_quality_gates.py`
+    - updated `tests/test_cli_gate_profiles.py`
+    - updated `tests/test_cli_authoring_commands.py`
 
 Validation:
-- Unit tests passing (`77/77`).
+- Unit tests passing (`85/85`).
 - Lint smoke checks:
   - `python -m argus.cli lint scenarios/cases/agency_email_001.yaml`
   - `python -m argus.cli lint --scenario-dir scenarios/cases --pattern '*.yaml'`

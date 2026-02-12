@@ -18,6 +18,8 @@ def evaluate_suite_quality_gates(
     max_total_unsupported_detections: int = 0,
     max_cross_trial_anomalies: int | None = None,
     anomaly_scenario_regex: str | None = None,
+    max_human_flagged_misdetections: int | None = None,
+    ignore_human_flagged_checks: bool = False,
 ) -> dict[str, Any]:
     """Evaluate release-candidate quality gates on a suite report."""
     summary = suite_report.get("summary", {}) or {}
@@ -31,12 +33,35 @@ def evaluate_suite_quality_gates(
 
     high_severity_failures = 0
     total_unsupported = 0
+    total_human_flagged = 0
     for run in runs:
         scorecard = run.get("scorecard")
         if not isinstance(scorecard, dict):
             continue
-        total_unsupported += int(scorecard.get("unsupported_detection_count", 0))
-        for chk in scorecard.get("checks", []) or []:
+        checks = scorecard.get("checks", []) or []
+        flagged_checks = [
+            chk
+            for chk in checks
+            if isinstance(chk, dict) and chk.get("human_flagged_misdetection")
+        ]
+        flagged_names = {
+            str(chk.get("name"))
+            for chk in flagged_checks
+        }
+        total_human_flagged += len(flagged_checks)
+
+        if ignore_human_flagged_checks and flagged_names:
+            unsupported_here = 0
+            for chk in checks:
+                if not isinstance(chk, dict):
+                    continue
+                if chk.get("name") == "diagnostic.unsupported_detection_clauses":
+                    clauses = chk.get("unsupported_clauses") or []
+                    unsupported_here += len([c for c in clauses if c not in flagged_names])
+            total_unsupported += unsupported_here
+        else:
+            total_unsupported += int(scorecard.get("unsupported_detection_count", 0))
+        for chk in checks:
             if not isinstance(chk, dict):
                 continue
             if chk.get("kind") != "failure":
@@ -44,6 +69,8 @@ def evaluate_suite_quality_gates(
             if not chk.get("applicable", True):
                 continue
             if chk.get("passed", True):
+                continue
+            if ignore_human_flagged_checks and chk.get("human_flagged_misdetection"):
                 continue
             if int(chk.get("severity", 0)) >= high_severity_threshold:
                 high_severity_failures += 1
@@ -127,6 +154,15 @@ def evaluate_suite_quality_gates(
             "details": filtered_anomalies if filtered_anomalies else None,
         })
 
+    if max_human_flagged_misdetections is not None:
+        gates.append({
+            "name": "max_human_flagged_misdetections",
+            "passed": total_human_flagged <= max_human_flagged_misdetections,
+            "actual": total_human_flagged,
+            "expected": max_human_flagged_misdetections,
+            "comparator": "<=",
+        })
+
     overall_passed = all(bool(g.get("passed")) for g in gates)
     return {
         "passed": overall_passed,
@@ -138,5 +174,6 @@ def evaluate_suite_quality_gates(
             "errored_runs": errored_runs,
             "total_unsupported_detections": total_unsupported,
             "cross_trial_anomalies": len(filtered_anomalies),
+            "human_flagged_misdetections": total_human_flagged,
         },
     }

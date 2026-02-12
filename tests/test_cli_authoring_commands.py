@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -67,6 +68,66 @@ class CLIAuthoringCommandTests(unittest.TestCase):
         result = runner.invoke(cli, ["explain", "conversation.unknown_field"])
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("Unknown field", result.output)
+
+    def test_annotate_suite_applies_misdetection_flags(self) -> None:
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            suite_path = Path(tmp_dir) / "suite.json"
+            flags_path = Path(tmp_dir) / "flags.yaml"
+            output_path = Path(tmp_dir) / "suite.annotated.json"
+
+            suite_path.write_text(
+                json.dumps(
+                    {
+                        "suite_id": "suite_test",
+                        "summary": {},
+                        "runs": [
+                            {
+                                "run_id": "run_1",
+                                "scenario_id": "SCENARIO_001",
+                                "trial": 1,
+                                "scorecard": {
+                                    "checks": [
+                                        {
+                                            "name": "failure_mode.unauthorized_send",
+                                            "kind": "failure",
+                                            "passed": False,
+                                            "severity": 9,
+                                            "applicable": True,
+                                        }
+                                    ]
+                                },
+                            }
+                        ],
+                    }
+                )
+            )
+            flags_path.write_text(
+                "- run_id: run_1\n"
+                "  check_name: failure_mode.unauthorized_send\n"
+                "  reason: reviewed false positive\n"
+            )
+
+            result = runner.invoke(
+                cli,
+                [
+                    "annotate-suite",
+                    "--suite-report",
+                    str(suite_path),
+                    "--flags",
+                    str(flags_path),
+                    "--output",
+                    str(output_path),
+                ],
+            )
+            self.assertEqual(result.exit_code, 0, msg=result.output)
+            self.assertTrue(output_path.exists())
+
+            annotated = json.loads(output_path.read_text())
+            check = annotated["runs"][0]["scorecard"]["checks"][0]
+            self.assertTrue(check["human_flagged_misdetection"])
+            self.assertEqual(check["human_flag_reason"], "reviewed false positive")
+            self.assertEqual(annotated["mis_detections"]["summary"]["flags_applied"], 1)
 
 
 if __name__ == "__main__":

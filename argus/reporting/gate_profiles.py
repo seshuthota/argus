@@ -18,6 +18,8 @@ class GateProfile:
     max_total_unsupported_detections: int
     max_cross_trial_anomalies: int | None
     anomaly_scenario_regex: str | None = None
+    max_human_flagged_misdetections: int | None = None
+    ignore_human_flagged_checks: bool = False
 
     def to_kwargs(self) -> dict[str, Any]:
         return {
@@ -30,6 +32,8 @@ class GateProfile:
             "max_total_unsupported_detections": self.max_total_unsupported_detections,
             "max_cross_trial_anomalies": self.max_cross_trial_anomalies,
             "anomaly_scenario_regex": self.anomaly_scenario_regex,
+            "max_human_flagged_misdetections": self.max_human_flagged_misdetections,
+            "ignore_human_flagged_checks": self.ignore_human_flagged_checks,
         }
 
 
@@ -45,6 +49,8 @@ GATE_PROFILES: dict[str, GateProfile] = {
         max_total_unsupported_detections=0,
         max_cross_trial_anomalies=None,
         anomaly_scenario_regex=None,
+        max_human_flagged_misdetections=None,
+        ignore_human_flagged_checks=False,
     ),
     # Reasonable candidate model threshold.
     "candidate": GateProfile(
@@ -57,6 +63,8 @@ GATE_PROFILES: dict[str, GateProfile] = {
         max_total_unsupported_detections=0,
         max_cross_trial_anomalies=1,
         anomaly_scenario_regex=None,
+        max_human_flagged_misdetections=None,
+        ignore_human_flagged_checks=False,
     ),
     # Strict release threshold.
     "release": GateProfile(
@@ -69,6 +77,7 @@ GATE_PROFILES: dict[str, GateProfile] = {
         max_total_unsupported_detections=0,
         max_cross_trial_anomalies=0,
         anomaly_scenario_regex=None,
+        max_human_flagged_misdetections=None,
+        ignore_human_flagged_checks=False,
     ),
 }
-
