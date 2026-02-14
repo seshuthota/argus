@@ -109,6 +109,69 @@ class LiteLLMAdapterRetryTests(unittest.TestCase):
         kwargs = completion_mock.call_args.kwargs
         self.assertEqual(kwargs["model"], "openrouter/openrouter/aurora-alpha")
 
+    def test_usage_extracts_reasoning_and_cached_tokens_when_present(self) -> None:
+        adapter = LiteLLMAdapter(
+            api_key="test",
+            api_base="https://openrouter.ai/api/v1",
+            max_retries=0,
+        )
+        settings = ModelSettings(model="openrouter/foo", temperature=0.0, max_tokens=32, seed=1)
+        usage = SimpleNamespace(
+            prompt_tokens=11,
+            completion_tokens=7,
+            total_tokens=18,
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=3),
+            prompt_tokens_details=SimpleNamespace(cached_tokens=2),
+        )
+        message = SimpleNamespace(content="ok", tool_calls=None)
+        choice = SimpleNamespace(message=message, finish_reason="stop")
+        response_obj = SimpleNamespace(choices=[choice], usage=usage)
+
+        with patch(
+            "argus.models.litellm_adapter.litellm.completion",
+            return_value=response_obj,
+        ):
+            response = adapter.execute_turn(
+                messages=[{"role": "user", "content": "hello"}],
+                tools=None,
+                settings=settings,
+            )
+
+        self.assertEqual(response.usage.get("prompt_tokens"), 11)
+        self.assertEqual(response.usage.get("completion_tokens"), 7)
+        self.assertEqual(response.usage.get("total_tokens"), 18)
+        self.assertEqual(response.usage.get("reasoning_tokens"), 3)
+        self.assertEqual(response.usage.get("cached_tokens"), 2)
+
+    def test_extracts_reasoning_content_from_think_tags(self) -> None:
+        adapter = LiteLLMAdapter()
+        settings = ModelSettings(model="openrouter/foo")
+        
+        content = "<think>This is reasoning</think>This is the answer"
+        message = SimpleNamespace(content=content, tool_calls=None)
+        choice = SimpleNamespace(message=message, finish_reason="stop")
+        response_obj = SimpleNamespace(choices=[choice], usage={})
+
+        with patch("argus.models.litellm_adapter.litellm.completion", return_value=response_obj):
+            response = adapter.execute_turn(messages=[], tools=None, settings=settings)
+
+        self.assertEqual(response.reasoning_content, "This is reasoning")
+        self.assertEqual(response.content, "This is the answer")
+
+    def test_obeys_native_reasoning_content_field(self) -> None:
+        adapter = LiteLLMAdapter()
+        settings = ModelSettings(model="openrouter/foo")
+        
+        message = SimpleNamespace(content="answer", reasoning_content="reasoning", tool_calls=None)
+        choice = SimpleNamespace(message=message, finish_reason="stop")
+        response_obj = SimpleNamespace(choices=[choice], usage={})
+
+        with patch("argus.models.litellm_adapter.litellm.completion", return_value=response_obj):
+            response = adapter.execute_turn(messages=[], tools=None, settings=settings)
+
+        self.assertEqual(response.reasoning_content, "reasoning")
+        self.assertEqual(response.content, "answer")
+
 
 if __name__ == "__main__":
     unittest.main()

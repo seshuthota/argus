@@ -31,6 +31,26 @@ Scaffold a new scenario file:
 python -m argus.cli init-scenario --id SAFETY_NEW_SCENARIO_001
 ```
 
+Generate adversarial pressure variants from one scenario:
+
+```bash
+python -m argus.cli mutate-scenarios \
+  --scenario scenarios/cases/agency_email_001.yaml \
+  --profile standard \
+  --max-variants 6 \
+  --output-dir scenarios/cases/mutated
+```
+
+Generate variants from a suite manifest:
+
+```bash
+python -m argus.cli mutate-scenarios \
+  --scenario-list scenarios/suites/sabotage_core_v1.txt \
+  --profile stress \
+  --max-variants 3 \
+  --output-dir scenarios/cases/mutated_sabotage
+```
+
 Explain schema fields while authoring:
 
 ```bash
@@ -42,6 +62,15 @@ python -m argus.cli explain failure_modes.detection
 
 ```bash
 python -m argus.cli run scenarios/cases/agency_email_001.yaml --model MiniMax-M2.1
+```
+
+Hybrid mode (deterministic + LLM judge for unmet semantic success checks):
+
+```bash
+python -m argus.cli run scenarios/cases/agency_email_001.yaml \
+  --model MiniMax-M2.1 \
+  --llm-judge \
+  --judge-model openrouter/aurora-alpha
 ```
 
 OpenRouter example (free model):
@@ -57,6 +86,19 @@ python -m argus.cli report <run_id>
 ```
 
 Reports are saved in `reports/runs/<run_id>.json`.
+
+Browse complete run/suite artifacts in a web UI:
+
+```bash
+python -m argus.cli serve-reports --reports-root reports --host 127.0.0.1 --port 8787
+```
+
+Then open:
+- `http://127.0.0.1:8787/`
+- `http://127.0.0.1:8787/runs/<run_id>`
+- `http://127.0.0.1:8787/suites/<suite_id>`
+
+Run detail pages include full transcript, scenario context, available/forbidden tools, step-by-step event timeline, tool I/O, gate decisions, checks, and token usage totals (including reasoning tokens when provider returns them).
 
 ### 4. Run a full scenario suite
 
@@ -76,6 +118,17 @@ Run from a suite manifest (newline-delimited scenario paths):
 
 ```bash
 python -m argus.cli run-suite --scenario-list scenarios/suites/sabotage_core_v1.txt --model MiniMax-M2.1 -n 1
+```
+
+Enable hybrid judging in suite runs:
+
+```bash
+python -m argus.cli run-suite \
+  --scenario-list scenarios/suites/sabotage_core_v1.txt \
+  --model MiniMax-M2.1 \
+  -n 1 \
+  --llm-judge \
+  --judge-model openrouter/aurora-alpha
 ```
 
 Calibration focus suite (monitoring/collusion + diffuse sandbagging):
@@ -118,6 +171,17 @@ python -m argus.cli benchmark-matrix \
   --models MiniMax-M2.1 \
   --models stepfun/step-3.5-flash:free \
   --models openrouter/aurora-alpha
+```
+
+Run a matrix with automatic adversarial mutation expansion:
+
+```bash
+python -m argus.cli benchmark-matrix \
+  --scenario-list scenarios/suites/sabotage_core_v1.txt \
+  --models MiniMax-M2.1 \
+  --models stepfun/step-3.5-flash:free \
+  --mutation-profile stress \
+  --mutation-max-variants 2
 ```
 
 Generate a narrative behavior report (transcript excerpts + tool trajectories + failure patterns):
@@ -360,6 +424,7 @@ Runtime/evaluation support:
 - `turn_assertions` are evaluated as weighted success checks.
 - Dynamic event authoring guide: `docs/dynamic_events.md`.
 - Scenario cookbook patterns: `docs/cookbook/README.md`.
+- `mutate-scenarios` generates deterministic adversarial knob variants (`light`, `standard`, `stress`).
 
 ## Authoring Example
 
@@ -465,6 +530,7 @@ python -m argus.cli gate \
 - gate JSONs in `reports/suites/gates/`
 - comparison markdown in `reports/suites/comparisons/`
 - behavior markdown in `reports/suites/behavior/`
+- optional LLM-judge overlay can be enabled with `--llm-judge` / `--judge-model`
 
 Default run:
 
@@ -476,6 +542,17 @@ python -m argus.cli benchmark-pipeline \
   --trials 3 \
   --profile candidate \
   --misdetection-flags reviews/misdetections.yaml
+```
+
+With mutation expansion:
+
+```bash
+python -m argus.cli benchmark-pipeline \
+  --scenario-list scenarios/suites/sabotage_extended_v1.txt \
+  --model-a MiniMax-M2.1 \
+  --model-b stepfun/step-3.5-flash:free \
+  --mutation-profile standard \
+  --mutation-max-variants 2
 ```
 
 Generate weekly-style trend markdown from JSONL history:

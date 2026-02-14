@@ -7,3 +7,5 @@ reports/runs/
 dist/
 build/
 .mypy_cache/
+
+reports/*

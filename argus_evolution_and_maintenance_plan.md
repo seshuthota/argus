@@ -45,6 +45,11 @@
 - **Task:** Add `python -m argus.cli init-scenario`. [Implemented]
 - **Details:** Generate a boilerplate YAML with all required fields and inline documentation explaining advanced fields like `dynamic_events` and `simulated_user`.
 
+### 2.4 Adversarial Mutation Generator
+- **Task:** Add `python -m argus.cli mutate-scenarios`. [Implemented]
+- **Details:** Deterministically generate pressure variants from base scenarios by mutating `knobs` and injecting explicit pressure cues into `setup.visible_context` and first user turn.
+- **Output:** Writes schema-valid variants into a target directory with mutation metadata for traceability.
+
 ---
 
 ## 3. Documentation Expansion (The "Argus Handbook")
@@ -77,6 +82,10 @@
 ### 4.2 Human-in-the-Loop Feedback
 - **Task:** Add a `mis-detection` flag to the suite report schema. [Implemented]
 - **Details:** Human auditors can flag specific check results using YAML/JSON inputs. Flags are attached to checks and surfaced in suite summaries and quality-gate metrics to support reviewer-aware release decisions.
+
+### 4.3 Hybrid LLM Judge Overlay
+- **Task:** Add optional LLM-as-judge for semantic success criteria while keeping deterministic checks as primary safety gates. [Implemented]
+- **Details:** Added `--llm-judge` and `--judge-model` support across run/suite/benchmark flows. The overlay can only upgrade failed success criteria and cannot override failure-mode triggers.
 
 ---
 
@@ -143,9 +152,34 @@ Completed:
     - updated `tests/test_quality_gates.py`
     - updated `tests/test_cli_gate_profiles.py`
     - updated `tests/test_cli_authoring_commands.py`
+- Adversarial mutation generation implemented:
+  - Module: `argus/scenario_mutation.py`
+  - CLI command: `python -m argus.cli mutate-scenarios`
+  - Schema extension: optional `mutation` metadata block in `schemas/scenario.schema.json`
+  - Matrix integration:
+    - `python -m argus.cli benchmark-matrix --mutation-profile <profile> --mutation-max-variants <N>`
+    - matrix artifacts now include mutation metadata (`base_scenario_count`, `generated_mutation_count`, `mutation` block)
+  - Pipeline integration:
+    - `python -m argus.cli benchmark-pipeline --mutation-profile <profile> --mutation-max-variants <N>`
+    - comparison markdown now includes a `Mutation Expansion` section when enabled
+  - Tests added:
+    - `tests/test_scenario_mutation.py`
+    - `tests/test_cli_benchmark_matrix_mutation.py`
+    - `tests/test_cli_benchmark_pipeline_mutation.py`
+    - updated `tests/test_schema_extensions.py`
+- Hybrid LLM judge overlay implemented:
+  - Module: `argus/evaluators/judge.py`
+  - CLI integration: `run`, `run-suite`, `benchmark-pipeline`, `benchmark-matrix`
+  - Verbose manual runner integration:
+    - `scripts/run_one_scenario_verbose.py --llm-judge --judge-model ...`
+  - Tests added:
+    - `tests/test_llm_judge.py`
+  - Smoke validation:
+    - `python -m argus.cli mutate-scenarios --scenario scenarios/cases/agency_email_001.yaml --profile light --max-variants 1 --output-dir <tmp>`
+    - `python -m argus.cli validate <tmp>/agency_email_001__urgency_urgent.yaml`
 
 Validation:
-- Unit tests passing (`85/85`).
+- Unit tests passing (`101/101`).
 - Lint smoke checks:
   - `python -m argus.cli lint scenarios/cases/agency_email_001.yaml`
   - `python -m argus.cli lint --scenario-dir scenarios/cases --pattern '*.yaml'`

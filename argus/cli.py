@@ -24,6 +24,7 @@ from .models.adapter import ModelSettings
 from .models.litellm_adapter import LiteLLMAdapter
 from .orchestrator.runner import ScenarioRunner
 from .evaluators.checks import run_all_checks
+from .evaluators.judge import apply_llm_judge_overrides
 from .evaluators.macros import resolve_detection_macros
 from .evaluators.golden import (
     load_golden_artifact,
@@ -51,6 +52,8 @@ from .reporting.visualize import (
     generate_trend_visuals,
     generate_pairwise_visuals,
 )
+from .reporting.web import serve_reports_forever
+from .scenario_mutation import available_profiles, generate_mutations_for_file
 
 console = Console()
 
@@ -307,6 +310,69 @@ def _validate_scenarios(scenario_paths: list[Path]) -> list[tuple[Path, dict]]:
                 console.print(f"    - {err}")
         sys.exit(1)
     return scenario_records
+
+
+def _expand_scenario_paths_with_mutations(
+    *,
+    scenario_paths: list[Path],
+    mutation_profile: str,
+    mutation_max_variants: int,
+    mutation_output_dir: str | None,
+    mutation_overwrite: bool,
+    output_dir: str,
+) -> tuple[list[Path], dict[str, Any]]:
+    """
+    Optionally expand a base scenario set with generated mutation variants.
+
+    Returns (expanded_paths, metadata).
+    """
+    profile = mutation_profile.strip().lower()
+    if profile == "none":
+        return scenario_paths, {
+            "enabled": False,
+            "profile": "none",
+            "base_scenario_count": len(scenario_paths),
+            "generated_variant_count": 0,
+            "output_dir": None,
+        }
+
+    if mutation_max_variants < 1:
+        raise ValueError("--mutation-max-variants must be >= 1")
+
+    if mutation_output_dir:
+        out_dir = Path(mutation_output_dir)
+    else:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        out_dir = Path(output_dir) / "mutations" / f"{ts}_{profile}"
+
+    generated: list[Path] = []
+    for source in scenario_paths:
+        generated.extend(
+            generate_mutations_for_file(
+                scenario_path=source,
+                output_dir=out_dir,
+                profile=profile,
+                max_variants=mutation_max_variants,
+                overwrite=mutation_overwrite,
+            )
+        )
+
+    merged: list[Path] = []
+    seen: set[str] = set()
+    for p in [*scenario_paths, *generated]:
+        key = str(p.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(p)
+
+    return merged, {
+        "enabled": True,
+        "profile": profile,
+        "base_scenario_count": len(scenario_paths),
+        "generated_variant_count": len(generated),
+        "output_dir": str(out_dir),
+    }
 
 
 @dataclass
@@ -855,6 +921,10 @@ def _run_suite_internal(
     output_dir: str,
     trends_dir: str,
     fail_fast: bool,
+    llm_judge: bool = False,
+    judge_model: str | None = None,
+    judge_temperature: float = 0.0,
+    judge_max_tokens: int = 512,
 ) -> tuple[dict[str, Any], Path, Path, str]:
     """Execute a suite run and return suite report artifact paths."""
     resolved_model, adapter = _resolve_model_and_adapter(
@@ -866,6 +936,15 @@ def _run_suite_internal(
     run_results: list[dict[str, object]] = []
     run_index = 0
     total_runs = len(scenario_records) * trials
+    judge_adapter = adapter
+    judge_model_resolved = resolved_model
+    if llm_judge and judge_model:
+        judge_model_resolved, judge_adapter = _resolve_model_and_adapter(
+            model=judge_model,
+            api_key=api_key,
+            api_base=api_base,
+            emit_provider_note=False,
+        )
 
     for scenario_path, scenario in scenario_records:
         for trial in range(1, trials + 1):
@@ -902,6 +981,20 @@ def _run_suite_internal(
                 continue
 
             check_results = run_all_checks(run_artifact, scenario)
+            llm_judge_meta: dict[str, Any] | None = None
+            if llm_judge:
+                check_results, llm_judge_meta = apply_llm_judge_overrides(
+                    check_results=check_results,
+                    run_artifact=run_artifact,
+                    scenario=scenario,
+                    adapter=judge_adapter,
+                    base_settings=settings,
+                    judge_model=judge_model_resolved,
+                    judge_temperature=judge_temperature,
+                    judge_max_tokens=judge_max_tokens,
+                )
+                if llm_judge_meta:
+                    run_artifact.runtime_summary["llm_judge"] = llm_judge_meta
             scorecard = compute_scores(run_artifact, check_results, scenario)
             run_report_path = save_run_report(scorecard, run_artifact)
 
@@ -1087,6 +1180,106 @@ def init_scenario_command(
     )
     out_path.write_text(content)
     console.print(f"[green]✓[/green] Scenario scaffold created: {out_path}")
+
+
+@cli.command("mutate-scenarios")
+@click.option(
+    "--scenario",
+    "scenario_paths",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Source scenario YAML path. Repeat for multiple files.",
+)
+@click.option(
+    "--scenario-list",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Optional newline-delimited list of scenario paths.",
+)
+@click.option(
+    "--profile",
+    type=click.Choice(list(available_profiles())),
+    default="standard",
+    show_default=True,
+    help="Mutation profile defining which knob stressors are generated.",
+)
+@click.option("--max-variants", default=6, type=int, show_default=True, help="Max variants per source scenario.")
+@click.option(
+    "--output-dir",
+    default="scenarios/cases/mutated",
+    show_default=True,
+    help="Directory to write mutated scenario YAML files.",
+)
+@click.option("--overwrite/--no-overwrite", default=False, show_default=True, help="Overwrite existing output files.")
+def mutate_scenarios_command(
+    scenario_paths: tuple[str, ...],
+    scenario_list: str | None,
+    profile: str,
+    max_variants: int,
+    output_dir: str,
+    overwrite: bool,
+):
+    """Generate adversarial pressure variants from one or more base scenarios."""
+    if max_variants < 1:
+        console.print("[red]✗ --max-variants must be >= 1[/red]")
+        sys.exit(1)
+
+    paths: list[Path] = [Path(p) for p in scenario_paths]
+    if scenario_list:
+        list_paths = _resolve_scenario_paths(
+            scenario_dir=".",
+            pattern="*.yaml",
+            scenario_list=scenario_list,
+        )
+        for p in list_paths:
+            if p not in paths:
+                paths.append(p)
+
+    if not paths:
+        console.print("[red]✗ Provide at least one --scenario or --scenario-list[/red]")
+        sys.exit(1)
+
+    schema_errors: list[str] = []
+    for path in paths:
+        _, errors = validate_scenario_file(path)
+        if errors:
+            schema_errors.append(f"{path}: {errors[0]}")
+    if schema_errors:
+        console.print("[red]✗ Source scenarios must be schema-valid before mutation:[/red]")
+        for err in schema_errors:
+            console.print(f"  [red]•[/red] {err}")
+        sys.exit(1)
+
+    out_dir = Path(output_dir)
+    generated_total = 0
+
+    console.print("\n[cyan]⚡ Argus Scenario Mutation[/cyan]")
+    console.print(f"  Source scenarios: {len(paths)}")
+    console.print(f"  Profile: {profile}")
+    console.print(f"  Max variants/source: {max_variants}")
+    console.print(f"  Output dir: {out_dir}")
+
+    for source in paths:
+        try:
+            outputs = generate_mutations_for_file(
+                scenario_path=source,
+                output_dir=out_dir,
+                profile=profile,
+                max_variants=max_variants,
+                overwrite=overwrite,
+            )
+        except FileExistsError as err:
+            console.print(f"[red]✗[/red] {err}")
+            console.print("[yellow]Use --overwrite to replace generated variants.[/yellow]")
+            sys.exit(1)
+        except Exception as err:
+            console.print(f"[red]✗ Failed to mutate {source}: {err}[/red]")
+            sys.exit(1)
+
+        generated_total += len(outputs)
+        console.print(f"[green]✓[/green] {source} -> {len(outputs)} variant(s)")
+
+    console.print(f"[green]✓[/green] Generated {generated_total} mutated scenario file(s).")
 
 
 @cli.command("explain")
@@ -1293,6 +1486,10 @@ def preflight(
 @click.option("--max-turns", default=10, help="Max conversation turns (default: 10)")
 @click.option("--api-key", default=None, help="API key (overrides .env)")
 @click.option("--api-base", default=None, help="API base URL (overrides .env)")
+@click.option("--llm-judge/--no-llm-judge", default=False, show_default=True, help="Enable LLM semantic judge overlay for unmet success checks.")
+@click.option("--judge-model", default=None, help="Optional model for judge calls (defaults to run model).")
+@click.option("--judge-temperature", default=0.0, type=float, show_default=True, help="Judge temperature.")
+@click.option("--judge-max-tokens", default=512, type=int, show_default=True, help="Judge max tokens.")
 def run(
     scenario_path: str,
     model: str,
@@ -1302,8 +1499,21 @@ def run(
     max_turns: int,
     api_key: str | None,
     api_base: str | None,
+    llm_judge: bool,
+    judge_model: str | None,
+    judge_temperature: float,
+    judge_max_tokens: int,
 ):
     """Run a scenario against a model and produce a scorecard."""
+    if max_tokens < 1:
+        console.print("[red]✗ --max-tokens must be >= 1[/red]")
+        sys.exit(1)
+    if max_turns < 1:
+        console.print("[red]✗ --max-turns must be >= 1[/red]")
+        sys.exit(1)
+    if judge_max_tokens < 1:
+        console.print("[red]✗ --judge-max-tokens must be >= 1[/red]")
+        sys.exit(1)
 
     # Load .env
     load_dotenv()
@@ -1352,6 +1562,27 @@ def run(
     # Evaluate
     console.print(f"\n[yellow]▶ Evaluating...[/yellow]")
     check_results = run_all_checks(run_artifact, scenario)
+    if llm_judge:
+        judge_adapter = adapter
+        judge_model_resolved = resolved_model
+        if judge_model:
+            judge_model_resolved, judge_adapter = _resolve_model_and_adapter(
+                model=judge_model,
+                api_key=api_key,
+                api_base=api_base,
+                emit_provider_note=False,
+            )
+        check_results, llm_judge_meta = apply_llm_judge_overrides(
+            check_results=check_results,
+            run_artifact=run_artifact,
+            scenario=scenario,
+            adapter=judge_adapter,
+            base_settings=settings,
+            judge_model=judge_model_resolved,
+            judge_temperature=judge_temperature,
+            judge_max_tokens=judge_max_tokens,
+        )
+        run_artifact.runtime_summary["llm_judge"] = llm_judge_meta
     scorecard = compute_scores(run_artifact, check_results, scenario)
 
     # Report
@@ -1379,6 +1610,10 @@ def run(
 @click.option("--max-turns", default=10, type=int, help="Max conversation turns (default: 10)")
 @click.option("--api-key", default=None, help="API key (overrides .env)")
 @click.option("--api-base", default=None, help="API base URL (overrides .env)")
+@click.option("--llm-judge/--no-llm-judge", default=False, show_default=True, help="Enable LLM semantic judge overlay for unmet success checks.")
+@click.option("--judge-model", default=None, help="Optional model for judge calls (defaults to run model).")
+@click.option("--judge-temperature", default=0.0, type=float, show_default=True, help="Judge temperature.")
+@click.option("--judge-max-tokens", default=512, type=int, show_default=True, help="Judge max tokens.")
 @click.option("--output-dir", default="reports/suites", help="Suite report output directory")
 @click.option("--trends-dir", default="reports/suites/trends", help="Trend history output directory")
 @click.option("--fail-fast/--no-fail-fast", default=False, help="Stop immediately on first run error")
@@ -1395,6 +1630,10 @@ def run_suite(
     max_turns: int,
     api_key: str | None,
     api_base: str | None,
+    llm_judge: bool,
+    judge_model: str | None,
+    judge_temperature: float,
+    judge_max_tokens: int,
     output_dir: str,
     trends_dir: str,
     fail_fast: bool,
@@ -1408,6 +1647,9 @@ def run_suite(
         sys.exit(1)
     if max_turns < 1:
         console.print("[red]✗ --max-turns must be >= 1[/red]")
+        sys.exit(1)
+    if judge_max_tokens < 1:
+        console.print("[red]✗ --judge-max-tokens must be >= 1[/red]")
         sys.exit(1)
 
     load_dotenv()
@@ -1451,6 +1693,10 @@ def run_suite(
         output_dir=output_dir,
         trends_dir=trends_dir,
         fail_fast=fail_fast,
+        llm_judge=llm_judge,
+        judge_model=judge_model,
+        judge_temperature=judge_temperature,
+        judge_max_tokens=judge_max_tokens,
     )
 
     print_suite_summary(suite_report)
@@ -1981,6 +2227,37 @@ def visualize_comparison(
         console.print(f"  - {name}: {p}")
 
 
+@cli.command("serve-reports")
+@click.option(
+    "--reports-root",
+    default="reports",
+    type=click.Path(exists=True, file_okay=False),
+    show_default=True,
+    help="Reports root directory containing runs/ and suites/ folders.",
+)
+@click.option("--host", default="127.0.0.1", show_default=True, help="Host interface to bind.")
+@click.option("--port", default=8787, type=int, show_default=True, help="Port to bind.")
+def serve_reports(reports_root: str, host: str, port: int):
+    """Serve a web UI for browsing complete run and suite artifacts."""
+    if port < 1 or port > 65535:
+        console.print("[red]✗ --port must be within [1,65535][/red]")
+        sys.exit(1)
+
+    console.print("\n[cyan]⚡ Argus Report Explorer[/cyan]")
+    console.print(f"  Reports root: {reports_root}")
+    console.print(f"  URL: http://{host}:{port}")
+    console.print("  Endpoints: /, /runs/<run_id>, /suites/<suite_id>, /api/runs/<run_id>, /api/suites/<suite_id>")
+    console.print("  Stop: Ctrl+C")
+
+    try:
+        serve_reports_forever(host=host, port=port, reports_root=reports_root)
+    except OSError as err:
+        console.print(f"[red]✗ Failed to start server: {err}[/red]")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped report explorer.[/yellow]")
+
+
 @cli.command("benchmark-pipeline")
 @click.option("--scenario-dir", default="scenarios/cases", type=click.Path(exists=True, file_okay=False))
 @click.option("--pattern", default="*.yaml", help="Glob pattern under --scenario-dir")
@@ -2002,6 +2279,35 @@ def visualize_comparison(
 @click.option("--api-base", default=None, help="API base URL (overrides .env)")
 @click.option("--output-dir", default="reports/suites", help="Suite report output directory")
 @click.option("--trends-dir", default="reports/suites/trends", help="Trend history output directory")
+@click.option("--llm-judge/--no-llm-judge", default=False, show_default=True, help="Enable LLM semantic judge overlay for unmet success checks.")
+@click.option("--judge-model", default=None, help="Optional model for judge calls (defaults to run model).")
+@click.option("--judge-temperature", default=0.0, type=float, show_default=True, help="Judge temperature.")
+@click.option("--judge-max-tokens", default=512, type=int, show_default=True, help="Judge max tokens.")
+@click.option(
+    "--mutation-profile",
+    type=click.Choice(["none", *list(available_profiles())]),
+    default="none",
+    show_default=True,
+    help="Optional adversarial mutation profile applied before running the pipeline.",
+)
+@click.option(
+    "--mutation-max-variants",
+    default=3,
+    type=int,
+    show_default=True,
+    help="Max generated variants per source scenario when mutation is enabled.",
+)
+@click.option(
+    "--mutation-output-dir",
+    default=None,
+    help="Optional directory for generated mutation YAML files (default under <output-dir>/mutations).",
+)
+@click.option(
+    "--mutation-overwrite/--no-mutation-overwrite",
+    default=False,
+    show_default=True,
+    help="Overwrite mutation output files if they already exist.",
+)
 @click.option(
     "--comparison-out",
     default=None,
@@ -2055,6 +2361,14 @@ def benchmark_pipeline(
     api_base: str | None,
     output_dir: str,
     trends_dir: str,
+    llm_judge: bool,
+    judge_model: str | None,
+    judge_temperature: float,
+    judge_max_tokens: int,
+    mutation_profile: str,
+    mutation_max_variants: int,
+    mutation_output_dir: str | None,
+    mutation_overwrite: bool,
     comparison_out: str | None,
     profile: str,
     min_pass_rate: float,
@@ -2083,15 +2397,39 @@ def benchmark_pipeline(
     if max_turns < 1:
         console.print("[red]✗ --max-turns must be >= 1[/red]")
         sys.exit(1)
+    if judge_max_tokens < 1:
+        console.print("[red]✗ --judge-max-tokens must be >= 1[/red]")
+        sys.exit(1)
+    if mutation_max_variants < 1:
+        console.print("[red]✗ --mutation-max-variants must be >= 1[/red]")
+        sys.exit(1)
 
     load_dotenv()
-    scenario_paths = _resolve_scenario_paths(
+    base_scenario_paths = _resolve_scenario_paths(
         scenario_dir=scenario_dir,
         pattern=pattern,
         scenario_list=scenario_list,
     )
-    if not scenario_paths:
+    if not base_scenario_paths:
         console.print("[red]✗ No scenarios resolved for benchmark pipeline[/red]")
+        sys.exit(1)
+
+    _validate_scenarios(base_scenario_paths)
+    try:
+        scenario_paths, mutation_meta = _expand_scenario_paths_with_mutations(
+            scenario_paths=base_scenario_paths,
+            mutation_profile=mutation_profile,
+            mutation_max_variants=mutation_max_variants,
+            mutation_output_dir=mutation_output_dir,
+            mutation_overwrite=mutation_overwrite,
+            output_dir=output_dir,
+        )
+    except FileExistsError as err:
+        console.print(f"[red]✗ {err}[/red]")
+        console.print("[yellow]Use --mutation-overwrite to replace existing mutation files.[/yellow]")
+        sys.exit(1)
+    except Exception as err:
+        console.print(f"[red]✗ Failed to expand mutation scenarios: {err}[/red]")
         sys.exit(1)
 
     scenario_records = _validate_scenarios(scenario_paths)
@@ -2113,6 +2451,14 @@ def benchmark_pipeline(
 
     console.print("\n[cyan]⚡ Argus Benchmark Pipeline[/cyan]")
     console.print(f"  Scenarios: {len(scenario_paths)}")
+    if mutation_meta["enabled"]:
+        console.print(
+            "  Mutation: "
+            f"profile={mutation_meta['profile']} "
+            f"base={mutation_meta['base_scenario_count']} "
+            f"generated={mutation_meta['generated_variant_count']}"
+        )
+        console.print(f"  Mutation output: {mutation_meta['output_dir']}")
     console.print(f"  Trials/scenario: {trials}")
     console.print(f"  Requested runs/model: {len(scenario_paths) * trials}")
     console.print(f"  Models: A={model_a}, B={model_b}")
@@ -2134,6 +2480,10 @@ def benchmark_pipeline(
         output_dir=output_dir,
         trends_dir=trends_dir,
         fail_fast=False,
+        llm_judge=llm_judge,
+        judge_model=judge_model,
+        judge_temperature=judge_temperature,
+        judge_max_tokens=judge_max_tokens,
     )
     print_suite_summary(suite_a)
     console.print(f"[green]✓[/green] Suite A report saved: {suite_path_a}")
@@ -2155,6 +2505,10 @@ def benchmark_pipeline(
         output_dir=output_dir,
         trends_dir=trends_dir,
         fail_fast=False,
+        llm_judge=llm_judge,
+        judge_model=judge_model,
+        judge_temperature=judge_temperature,
+        judge_max_tokens=judge_max_tokens,
     )
     print_suite_summary(suite_b)
     console.print(f"[green]✓[/green] Suite B report saved: {suite_path_b}")
@@ -2187,6 +2541,12 @@ def benchmark_pipeline(
         gate_result_b=gate_b,
         title="Argus Benchmark Pipeline Report",
     )
+    if mutation_meta["enabled"]:
+        md += "\n## Mutation Expansion\n\n"
+        md += f"- Profile: `{mutation_meta['profile']}`\n"
+        md += f"- Base scenarios: `{mutation_meta['base_scenario_count']}`\n"
+        md += f"- Generated variants: `{mutation_meta['generated_variant_count']}`\n"
+        md += f"- Mutation output dir: `{mutation_meta['output_dir']}`\n"
     comparison_path.parent.mkdir(parents=True, exist_ok=True)
     comparison_path.write_text(md)
 
@@ -2243,6 +2603,35 @@ def benchmark_pipeline(
 @click.option("--api-base", default=None, help="API base URL (overrides .env)")
 @click.option("--output-dir", default="reports/suites", help="Suite report output directory")
 @click.option("--trends-dir", default="reports/suites/trends", help="Trend history output directory")
+@click.option("--llm-judge/--no-llm-judge", default=False, show_default=True, help="Enable LLM semantic judge overlay for unmet success checks.")
+@click.option("--judge-model", default=None, help="Optional model for judge calls (defaults to run model).")
+@click.option("--judge-temperature", default=0.0, type=float, show_default=True, help="Judge temperature.")
+@click.option("--judge-max-tokens", default=512, type=int, show_default=True, help="Judge max tokens.")
+@click.option(
+    "--mutation-profile",
+    type=click.Choice(["none", *list(available_profiles())]),
+    default="none",
+    show_default=True,
+    help="Optional adversarial mutation profile applied before running matrix.",
+)
+@click.option(
+    "--mutation-max-variants",
+    default=3,
+    type=int,
+    show_default=True,
+    help="Max generated variants per source scenario when mutation is enabled.",
+)
+@click.option(
+    "--mutation-output-dir",
+    default=None,
+    help="Optional directory for generated mutation YAML files (default under <output-dir>/mutations).",
+)
+@click.option(
+    "--mutation-overwrite/--no-mutation-overwrite",
+    default=False,
+    show_default=True,
+    help="Overwrite mutation output files if they already exist.",
+)
 @click.option(
     "--profile",
     type=click.Choice(["baseline", "candidate", "release", "custom"]),
@@ -2290,6 +2679,14 @@ def benchmark_matrix(
     api_base: str | None,
     output_dir: str,
     trends_dir: str,
+    llm_judge: bool,
+    judge_model: str | None,
+    judge_temperature: float,
+    judge_max_tokens: int,
+    mutation_profile: str,
+    mutation_max_variants: int,
+    mutation_output_dir: str | None,
+    mutation_overwrite: bool,
     profile: str,
     min_pass_rate: float,
     max_avg_total_severity: float,
@@ -2320,16 +2717,41 @@ def benchmark_matrix(
     if max_turns < 1:
         console.print("[red]✗ --max-turns must be >= 1[/red]")
         sys.exit(1)
+    if judge_max_tokens < 1:
+        console.print("[red]✗ --judge-max-tokens must be >= 1[/red]")
+        sys.exit(1)
+    if mutation_max_variants < 1:
+        console.print("[red]✗ --mutation-max-variants must be >= 1[/red]")
+        sys.exit(1)
 
     load_dotenv()
-    scenario_paths = _resolve_scenario_paths(
+    base_scenario_paths = _resolve_scenario_paths(
         scenario_dir=scenario_dir,
         pattern=pattern,
         scenario_list=scenario_list,
     )
-    if not scenario_paths:
+    if not base_scenario_paths:
         console.print("[red]✗ No scenarios resolved for benchmark matrix[/red]")
         sys.exit(1)
+    _validate_scenarios(base_scenario_paths)
+
+    try:
+        scenario_paths, mutation_meta = _expand_scenario_paths_with_mutations(
+            scenario_paths=base_scenario_paths,
+            mutation_profile=mutation_profile,
+            mutation_max_variants=mutation_max_variants,
+            mutation_output_dir=mutation_output_dir,
+            mutation_overwrite=mutation_overwrite,
+            output_dir=output_dir,
+        )
+    except FileExistsError as err:
+        console.print(f"[red]✗ {err}[/red]")
+        console.print("[yellow]Use --mutation-overwrite to replace existing mutation files.[/yellow]")
+        sys.exit(1)
+    except Exception as err:
+        console.print(f"[red]✗ Failed to expand mutation scenarios: {err}[/red]")
+        sys.exit(1)
+
     scenario_records = _validate_scenarios(scenario_paths)
     gate_kwargs = _resolved_gate_kwargs(
         ctx=ctx,
@@ -2349,6 +2771,14 @@ def benchmark_matrix(
 
     console.print("\n[cyan]⚡ Argus Benchmark Matrix[/cyan]")
     console.print(f"  Scenarios: {len(scenario_paths)}")
+    if mutation_meta["enabled"]:
+        console.print(
+            "  Mutation: "
+            f"profile={mutation_meta['profile']} "
+            f"base={mutation_meta['base_scenario_count']} "
+            f"generated={mutation_meta['generated_variant_count']}"
+        )
+        console.print(f"  Mutation output: {mutation_meta['output_dir']}")
     console.print(f"  Trials/scenario: {trials}")
     console.print(f"  Requested runs/model: {len(scenario_paths) * trials}")
     console.print(f"  Models: {', '.join(models)}")
@@ -2372,6 +2802,10 @@ def benchmark_matrix(
             output_dir=output_dir,
             trends_dir=trends_dir,
             fail_fast=False,
+            llm_judge=llm_judge,
+            judge_model=judge_model,
+            judge_temperature=judge_temperature,
+            judge_max_tokens=judge_max_tokens,
         )
         if feedback_flags is not None:
             suite_report, stats = apply_misdetection_flags(suite_report, feedback_flags)
@@ -2437,6 +2871,9 @@ def benchmark_matrix(
     matrix_payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "scenario_count": len(scenario_paths),
+        "base_scenario_count": mutation_meta["base_scenario_count"],
+        "generated_mutation_count": mutation_meta["generated_variant_count"],
+        "mutation": mutation_meta,
         "trials_per_scenario": trials,
         "profile": profile,
         "models": [
@@ -2461,6 +2898,13 @@ def benchmark_matrix(
     md_lines.append("")
     md_lines.append(f"- Generated: `{matrix_payload['generated_at']}`")
     md_lines.append(f"- Scenarios: `{len(scenario_paths)}`")
+    if mutation_meta["enabled"]:
+        md_lines.append(
+            f"- Mutation: profile=`{mutation_meta['profile']}` "
+            f"base=`{mutation_meta['base_scenario_count']}` "
+            f"generated=`{mutation_meta['generated_variant_count']}`"
+        )
+        md_lines.append(f"- Mutation output: `{mutation_meta['output_dir']}`")
     md_lines.append(f"- Trials/scenario: `{trials}`")
     md_lines.append(f"- Gate profile: `{profile}`")
     md_lines.append("")

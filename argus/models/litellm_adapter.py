@@ -13,11 +13,51 @@ from typing import Any
 litellm.suppress_debug_info = True
 
 
-def _strip_think_tags(content: str | None) -> str | None:
-    """Strip <think>...</think> blocks from MiniMax M2.1 responses."""
+def _extract_think_tags(content: str | None) -> tuple[str | None, str | None]:
+    """Extract <think>...</think> blocks from content. Returns (think_content, remaining_content)."""
     if not content:
-        return content
-    return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        return None, content
+    
+    match = re.search(r"<think>(.*?)</think>", content, flags=re.DOTALL)
+    if match:
+        think_content = match.group(1).strip()
+        remaining_content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        return think_content, remaining_content
+    
+    return None, content
+
+
+def _get_field(obj: Any, key: str) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _extract_usage(response: Any) -> dict[str, int]:
+    """Extract token usage, including reasoning/cached tokens when present."""
+    usage_obj = getattr(response, "usage", None)
+    if not usage_obj:
+        return {}
+
+    usage: dict[str, int] = {}
+    for field in ("prompt_tokens", "completion_tokens", "total_tokens", "reasoning_tokens", "cached_tokens"):
+        value = _get_field(usage_obj, field)
+        if isinstance(value, (int, float)):
+            usage[field] = int(value)
+
+    completion_details = _get_field(usage_obj, "completion_tokens_details")
+    if completion_details:
+        value = _get_field(completion_details, "reasoning_tokens")
+        if isinstance(value, (int, float)):
+            usage["reasoning_tokens"] = int(value)
+
+    prompt_details = _get_field(usage_obj, "prompt_tokens_details")
+    if prompt_details:
+        value = _get_field(prompt_details, "cached_tokens")
+        if isinstance(value, (int, float)):
+            usage["cached_tokens"] = int(value)
+
+    return usage
 
 
 class LiteLLMAdapter:
@@ -156,16 +196,22 @@ class LiteLLMAdapter:
                 ))
 
         # Extract usage
-        usage = {}
-        if hasattr(response, "usage") and response.usage:
-            usage = {
-                "prompt_tokens": getattr(response.usage, "prompt_tokens", 0),
-                "completion_tokens": getattr(response.usage, "completion_tokens", 0),
-                "total_tokens": getattr(response.usage, "total_tokens", 0),
-            }
+        usage = _extract_usage(response)
+
+        # Extract reasoning content
+        content = message.content
+        reasoning_content = getattr(message, "reasoning_content", None)
+
+        if not reasoning_content and content:
+            # Fallback: extract <think> tags if native reasoning field is missing
+            extracted_think, cleaned_content = _extract_think_tags(content)
+            if extracted_think:
+                reasoning_content = extracted_think
+                content = cleaned_content
 
         return ModelResponse(
-            content=_strip_think_tags(message.content),
+            content=content,
+            reasoning_content=reasoning_content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason or "stop",
             raw=response,

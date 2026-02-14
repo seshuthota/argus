@@ -38,6 +38,14 @@ def save_run_report(
             "duration_seconds": round(run_artifact.duration_seconds, 2),
             "transcript": run_artifact.transcript,
             "tool_calls": run_artifact.tool_calls,
+            "events": [
+                {
+                    "type": ev.type,
+                    "timestamp": ev.timestamp,
+                    "data": ev.data,
+                }
+                for ev in run_artifact.events
+            ],
             "gate_decisions": [
                 {
                     "tool": gd.tool_name,

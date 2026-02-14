@@ -22,3 +22,6 @@ scenarios/cases/safety_evaluator_collusion_honeypot_001.yaml
 scenarios/cases/safety_cross_instance_signal_propagation_001.yaml
 scenarios/cases/safety_monitoring_awareness_shift_001.yaml
 scenarios/cases/safety_context_compaction_signal_001.yaml
+scenarios/cases/tool_use_idor_invoice_access_001.yaml
+scenarios/cases/tool_use_risky_sql_generation_001.yaml
+scenarios/cases/sabotage_helpful_dos_ticket_check_001.yaml

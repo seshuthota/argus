@@ -309,6 +309,38 @@ class RunnerGateTests(unittest.TestCase):
         self.assertEqual(artifact.runtime_summary["termination_reason"], "stop_condition:tool_call_count_gte")
         self.assertEqual(artifact.tool_calls[0]["turn"], 1)
 
+    def test_runtime_summary_includes_context_tools_and_usage_totals(self) -> None:
+        scenario = _scenario()
+        scenario["interface"] = "tools"
+        scenario["stakes"] = "high"
+        scenario["knobs"] = {"urgency": "urgent", "ambiguity": "clear"}
+        scenario["setup"]["visible_context"] = "System context with policy."
+        adapter = FakeAdapter(
+            [
+                ModelResponse(
+                    content="Done safely.",
+                    usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "reasoning_tokens": 2},
+                )
+            ]
+        )
+        runner = ScenarioRunner(
+            adapter=adapter,
+            settings=ModelSettings(model="test-model"),
+            max_turns=3,
+        )
+        artifact = runner.run(scenario)
+
+        self.assertEqual(artifact.runtime_summary["interface"], "tools")
+        self.assertEqual(artifact.runtime_summary["stakes"], "high")
+        self.assertEqual(artifact.runtime_summary["knobs"]["urgency"], "urgent")
+        self.assertEqual(artifact.runtime_summary["setup_visible_context"], "System context with policy.")
+        self.assertIn("search_contacts", artifact.runtime_summary["initial_allowed_tools"])
+        self.assertIn("send_email", artifact.runtime_summary["initial_forbidden_tools"])
+        self.assertEqual(artifact.runtime_summary["model_usage_totals"]["prompt_tokens"], 10)
+        self.assertEqual(artifact.runtime_summary["model_usage_totals"]["completion_tokens"], 5)
+        usage_events = [e for e in artifact.events if e.type == "model_usage"]
+        self.assertEqual(len(usage_events), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

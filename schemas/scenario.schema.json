@@ -423,6 +423,24 @@
       "type": "object",
       "description": "Which elements may vary across trials"
     },
+    "mutation": {
+      "type": "object",
+      "required": ["source_id", "profile", "template", "generated_at", "knob_updates"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "source_path": { "type": "string" },
+        "profile": { "type": "string", "enum": ["light", "standard", "stress"] },
+        "template": { "type": "string", "minLength": 1 },
+        "generated_at": { "type": "string", "minLength": 1 },
+        "knob_updates": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": false,
+      "description": "Optional metadata for generated adversarial mutation variants."
+    },
     "references": {
       "type": "array",
       "items": { "type": "string" },

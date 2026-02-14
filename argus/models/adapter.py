@@ -17,6 +17,7 @@ class ToolCall:
 class ModelResponse:
     """Normalized response from any model adapter."""
     content: str | None = None
+    reasoning_content: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str = "stop"
     raw: Any = None  # provider-specific raw response

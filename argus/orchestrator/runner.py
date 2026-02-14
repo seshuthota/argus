@@ -146,10 +146,16 @@ class ScenarioRunner:
         content: str,
         turn: int,
         source: str,
+        reasoning_content: str | None = None,
         extra_transcript: dict[str, Any] | None = None,
     ) -> None:
         """Append a message to model context and transcript/events."""
         model_msg = {"role": self._normalize_message_role(role), "content": content}
+        if reasoning_content:
+             # Some providers support reasoning_content in history, others don't.
+             # For now, we only store it in the transcript, not in the model context history
+             # to avoid confusing models that don't support it.
+             pass
         messages.append(model_msg)
 
         transcript_msg: dict[str, Any] = {
@@ -158,6 +164,9 @@ class ScenarioRunner:
             "turn": turn,
             "source": source,
         }
+        if reasoning_content:
+            transcript_msg["reasoning_content"] = reasoning_content
+
         if extra_transcript:
             transcript_msg.update(extra_transcript)
         artifact.transcript.append(transcript_msg)
@@ -436,6 +445,12 @@ class ScenarioRunner:
 
         runtime = self._build_runtime_state(scenario)
         artifact.runtime_summary = {
+            "interface": scenario.get("interface"),
+            "stakes": scenario.get("stakes"),
+            "knobs": scenario.get("knobs", {}),
+            "setup_visible_context": scenario.get("setup", {}).get("visible_context", ""),
+            "initial_allowed_tools": sorted(runtime["allowed_tools"]),
+            "initial_forbidden_tools": sorted(runtime["forbidden_tools"]),
             "turn_limit": runtime["turn_limit"],
             "tool_budget": runtime["tool_budget"],
             "dynamic_events_loaded": len(runtime["dynamic_events"]),
@@ -443,6 +458,12 @@ class ScenarioRunner:
             "conversation_mode": runtime["user_mode"],
         }
         artifact.events.append(RunEvent(type="runtime_config", data=dict(artifact.runtime_summary)))
+        artifact.events.append(
+            RunEvent(
+                type="setup_context",
+                data={"visible_context": scenario.get("setup", {}).get("visible_context", "")},
+            )
+        )
 
         simulated_user_engine: SimulatedUserEngine | None = None
         if runtime["user_mode"] == "simulated":
@@ -494,6 +515,27 @@ class ScenarioRunner:
                     )
                 )
                 break
+
+            usage = response.usage if isinstance(response.usage, dict) else {}
+            usage_numeric = {
+                str(k): (int(v) if isinstance(v, int) and not isinstance(v, bool) else float(v))
+                for k, v in usage.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            }
+            if usage_numeric:
+                totals = runtime.setdefault("model_usage_totals", {})
+                for key, value in usage_numeric.items():
+                    totals[key] = totals.get(key, 0) + value
+                artifact.events.append(
+                    RunEvent(
+                        type="model_usage",
+                        data={
+                            "turn": turns,
+                            "usage": usage_numeric,
+                            "finish_reason": response.finish_reason,
+                        },
+                    )
+                )
 
             if response.has_tool_calls:
                 tool_calls_msg: dict[str, Any] = {
@@ -639,6 +681,7 @@ class ScenarioRunner:
                     content=response.content,
                     turn=turns,
                     source="model_response",
+                    reasoning_content=response.reasoning_content,
                 )
 
             self._apply_dynamic_events(
@@ -698,6 +741,7 @@ class ScenarioRunner:
                 "effective_allowed_tools": sorted(runtime["allowed_tools"]),
                 "effective_forbidden_tools": sorted(runtime["forbidden_tools"]),
                 "user_turns_emitted": runtime["user_turns_emitted"],
+                "model_usage_totals": runtime.get("model_usage_totals", {}),
             }
         )
         artifact.end_time = time.time()

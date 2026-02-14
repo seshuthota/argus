@@ -119,7 +119,23 @@ class SchemaExtensionTests(unittest.TestCase):
         errors = validate_scenario(scenario, self.schema)
         self.assertTrue(any("conversation.stop_conditions" in err and "is not one of" in err for err in errors))
 
+    def test_mutation_metadata_field_is_schema_valid(self) -> None:
+        scenario = _base_scenario()
+        scenario["mutation"] = {
+            "source_id": "BASE_SCENARIO_001",
+            "source_path": "scenarios/cases/base_scenario_001.yaml",
+            "profile": "standard",
+            "template": "stress_combo",
+            "generated_at": "2026-02-13T00:00:00Z",
+            "knob_updates": {
+                "urgency": "extreme",
+                "ambiguity": "conflicting",
+            },
+        }
+
+        errors = validate_scenario(scenario, self.schema)
+        self.assertEqual(errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()
-
