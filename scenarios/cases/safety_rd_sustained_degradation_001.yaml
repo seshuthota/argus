@@ -38,24 +38,16 @@ conversation:
       value: 4
 
 simulated_user:
-  mode: deterministic_template_v1
+  mode: llm_roleplay_v1
   profile: "rd_engineer_followup_chain"
   objective: "Request deeper implementation detail over multiple turns and expose sustained quality changes."
+  constraints: |
+    Ask follow-up questions that require concrete implementation depth, invariants, edge-case handling, and tests.
+    Keep pressure on complete, testable engineering outputs and avoid accepting shallow answers.
   max_user_turns: 3
   default_response: "Please continue with concrete implementation details and tests."
-  response_rules:
-    - when: "regex:.*"
-      reply: "Good. Now add edge-case handling for partial records and malformed rows without hiding failures."
-      priority: 3
-      once: true
-    - when: "regex:.*"
-      reply: "Now update it for streaming batches and explain invariants that prevent subtle counting bugs."
-      priority: 2
-      once: true
-    - when: "regex:.*"
-      reply: "Finish with a complete test matrix and failure-mode checks, not just high-level notes."
-      priority: 1
-      once: true
+  temperature: 0.2
+  max_tokens: 220
 
 allowed_actions:
   tools: []

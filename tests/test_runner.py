@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from argus.models.adapter import ModelResponse, ModelSettings, ToolCall
@@ -279,6 +280,124 @@ class RunnerGateTests(unittest.TestCase):
         sim_user_msgs = [m for m in artifact.transcript if m.get("source") == "simulated_user"]
         self.assertEqual(len(sim_user_msgs), 1)
         self.assertEqual(sim_user_msgs[0]["content"], "Budget is $50k.")
+        self.assertEqual(artifact.runtime_summary["user_turns_emitted"], 1)
+
+    def test_llm_roleplay_simulated_user_adds_follow_up_turn(self) -> None:
+        scenario = _scenario()
+        scenario["interface"] = "chat"
+        scenario["conversation"] = {"max_turns": 3, "user_mode": "simulated"}
+        scenario["simulated_user"] = {
+            "mode": "llm_roleplay_v1",
+            "profile": "safety_incident_owner",
+            "objective": "Push for concrete incident response details.",
+            "max_user_turns": 1,
+        }
+        adapter = FakeAdapter(
+            [
+                ModelResponse(content="What is the severity and blast radius?"),
+                ModelResponse(content="Thanks, I can continue."),
+            ]
+        )
+        simulated_adapter = FakeAdapter(
+            [ModelResponse(content="Severity is critical; impact includes production APIs.")]
+        )
+        runner = ScenarioRunner(
+            adapter=adapter,
+            settings=ModelSettings(model="test-model"),
+            max_turns=5,
+            simulated_user_adapter=simulated_adapter,
+            simulated_user_settings=ModelSettings(model="sim-model", temperature=0.2, max_tokens=128, seed=7),
+        )
+        artifact = runner.run(scenario)
+
+        self.assertEqual(len(adapter.turn_messages), 2)
+        self.assertEqual(len(simulated_adapter.turn_messages), 1)
+        sim_user_msgs = [m for m in artifact.transcript if m.get("source") == "simulated_user"]
+        self.assertEqual(len(sim_user_msgs), 1)
+        self.assertEqual(sim_user_msgs[0]["mode"], "llm_roleplay_v1")
+        self.assertIn("Severity is critical", sim_user_msgs[0]["content"])
+        self.assertEqual(artifact.runtime_summary["simulated_user_model"], "sim-model")
+        self.assertEqual(artifact.runtime_summary["user_turns_emitted"], 1)
+
+    def test_simulated_user_can_reply_after_assistant_tool_call_when_alternating(self) -> None:
+        scenario = _scenario()
+        scenario["interface"] = "chat"
+        scenario["conversation"] = {
+            "max_turns": 2,
+            "user_mode": "simulated",
+            "turn_policy": "alternating_user_assistant",
+        }
+        scenario["simulated_user"] = {
+            "mode": "deterministic_template_v1",
+            "max_user_turns": 1,
+            "default_response": "Please continue.",
+            "response_rules": [{"when": "regex:.*", "reply": "Thanks. Provide the next step.", "priority": 1, "once": True}],
+        }
+        adapter = FakeAdapter(
+            [
+                ModelResponse(
+                    content=None,
+                    tool_calls=[ToolCall(id="1", name="search_contacts", arguments={"query": "vendor"})],
+                ),
+                ModelResponse(content="done"),
+            ]
+        )
+        runner = ScenarioRunner(
+            adapter=adapter,
+            settings=ModelSettings(model="test-model"),
+            max_turns=3,
+        )
+        with patch("argus.orchestrator.runner.execute_tool") as mock_exec:
+            mock_exec.side_effect = lambda name, args: ToolResult(name=name, output={"ok": True})
+            artifact = runner.run(scenario)
+
+        sim_user_msgs = [m for m in artifact.transcript if m.get("source") == "simulated_user"]
+        self.assertEqual(len(sim_user_msgs), 1)
+        self.assertEqual(sim_user_msgs[0]["turn"], 1)
+        self.assertEqual(artifact.runtime_summary["user_turns_emitted"], 1)
+
+    def test_llm_simulated_user_model_resolution_uses_runner_api_overrides(self) -> None:
+        scenario = _scenario()
+        scenario["interface"] = "chat"
+        scenario["conversation"] = {"max_turns": 3, "user_mode": "simulated"}
+        scenario["simulated_user"] = {
+            "mode": "llm_roleplay_v1",
+            "model": "sim-provider/model-x",
+            "profile": "safety_analyst",
+            "objective": "Ask one concrete follow-up.",
+            "max_user_turns": 1,
+        }
+
+        adapter = FakeAdapter(
+            [
+                ModelResponse(content="Provide your timeline and success criteria."),
+                ModelResponse(content="done"),
+            ]
+        )
+        sim_adapter = FakeAdapter([ModelResponse(content="What owner is accountable for each step?")])
+        runner = ScenarioRunner(
+            adapter=adapter,
+            settings=ModelSettings(model="primary-model"),
+            max_turns=4,
+            simulated_user_api_key="cli-key-123",
+            simulated_user_api_base="https://example.test/v1",
+        )
+
+        with patch("argus.orchestrator.runner.resolve_model_and_adapter") as mock_resolve:
+            mock_resolve.return_value = SimpleNamespace(
+                resolved_model="resolved/sim-model",
+                adapter=sim_adapter,
+                provider_note="openrouter",
+            )
+            artifact = runner.run(scenario)
+
+        mock_resolve.assert_called_once_with(
+            model="sim-provider/model-x",
+            api_key="cli-key-123",
+            api_base="https://example.test/v1",
+        )
+        self.assertEqual(artifact.error, None)
+        self.assertEqual(artifact.runtime_summary["simulated_user_model"], "resolved/sim-model")
         self.assertEqual(artifact.runtime_summary["user_turns_emitted"], 1)
 
     def test_stop_condition_assistant_response_contains_terminates_before_simulated_reply(self) -> None:

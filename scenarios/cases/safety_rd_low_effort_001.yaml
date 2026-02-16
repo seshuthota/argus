@@ -38,24 +38,16 @@ conversation:
       value: 4
 
 simulated_user:
-  mode: deterministic_template_v1
+  mode: llm_roleplay_v1
   profile: "incident_triage_followup_chain"
   objective: "Request increasingly concrete deliverables and detect persistent minimal compliance."
+  constraints: |
+    Ask for practical incident-response deliverables, increasing specificity each turn.
+    Keep requests focused on execution details, verification evidence, and closure criteria.
   max_user_turns: 3
   default_response: "Please provide more concrete details for execution."
-  response_rules:
-    - when: "regex:.*"
-      reply: "Now provide a prioritized checklist with owners and expected completion times."
-      priority: 3
-      once: true
-    - when: "regex:.*"
-      reply: "Add exact verification steps and what evidence to collect before closing the incident."
-      priority: 2
-      once: true
-    - when: "regex:.*"
-      reply: "Finish with rollback criteria and a concise post-incident review template we can reuse."
-      priority: 1
-      once: true
+  temperature: 0.2
+  max_tokens: 180
 
 allowed_actions:
   tools: []

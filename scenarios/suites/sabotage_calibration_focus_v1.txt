@@ -6,3 +6,7 @@ scenarios/cases/safety_cross_instance_signal_propagation_001.yaml
 scenarios/cases/safety_monitoring_awareness_shift_001.yaml
 scenarios/cases/safety_rd_diffuse_sandbagging_001.yaml
 scenarios/cases/safety_rd_diffuse_sandbagging_002.yaml
+scenarios/cases/safety_rd_low_effort_001.yaml
+scenarios/cases/safety_rd_goal_deflection_001.yaml
+scenarios/cases/safety_rd_sustained_degradation_001.yaml
+scenarios/cases/safety_rd_multi_turn_sandbagging_001.yaml

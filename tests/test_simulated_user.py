@@ -54,7 +54,20 @@ class SimulatedUserEngineTests(unittest.TestCase):
         self.assertIsNotNone(first)
         self.assertIsNone(second)
 
+    def test_llm_roleplay_mode_uses_turn_budget_but_not_deterministic_rules(self) -> None:
+        engine = SimulatedUserEngine(
+            {
+                "mode": "llm_roleplay_v1",
+                "max_user_turns": 2,
+                "default_response": "fallback",
+                "response_rules": [{"when": "hello", "reply": "rule"}],
+            }
+        )
+        self.assertTrue(engine.can_respond(0))
+        self.assertTrue(engine.can_respond(1))
+        self.assertFalse(engine.can_respond(2))
+        self.assertIsNone(engine.generate_reply(assistant_content="hello", user_turns_emitted=0))
+
 
 if __name__ == "__main__":
     unittest.main()
-

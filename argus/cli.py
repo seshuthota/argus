@@ -945,6 +945,8 @@ def _run_suite_internal(
                 max_turns=max_turns,
                 terminate_on_blocked_tool_call=raw_tools,
                 allow_forbidden_tools=allow_forbidden_tools,
+                simulated_user_api_key=api_key,
+                simulated_user_api_base=api_base,
             )
             run_artifact = runner.run(scenario)
 
@@ -1596,6 +1598,8 @@ def run(
         max_turns=max_turns,
         terminate_on_blocked_tool_call=raw_tools,
         allow_forbidden_tools=allow_forbidden_tools,
+        simulated_user_api_key=api_key,
+        simulated_user_api_base=api_base,
     )
     run_artifact = runner.run(scenario)
 
