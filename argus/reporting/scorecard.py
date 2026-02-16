@@ -13,6 +13,7 @@ from rich import box
 
 from ..scoring.engine import ScoreCard
 from ..orchestrator.runner import RunArtifact
+from ..storage.factory import create_storage, is_remote_storage_uri
 
 
 console = Console()
@@ -22,11 +23,9 @@ def save_run_report(
     scorecard: ScoreCard,
     run_artifact: RunArtifact,
     output_dir: str | Path = "reports/runs",
-) -> Path:
-    """Save a JSON run report and return the path."""
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
+    output_uri: str | None = None,
+) -> Path | str:
+    """Save a JSON run report and return local path or remote URI."""
     report = {
         "scorecard": scorecard.to_dict(),
         "run": {
@@ -59,9 +58,23 @@ def save_run_report(
         },
     }
 
-    report_path = output_dir / f"{run_artifact.run_id}.json"
-    with open(report_path, "w") as f:
-        json.dump(report, f, indent=2)
+    report_json = json.dumps(report, indent=2)
+    report_name = f"{run_artifact.run_id}.json"
+    resolved_output_uri = output_uri
+    if resolved_output_uri is None and isinstance(output_dir, str) and is_remote_storage_uri(output_dir):
+        resolved_output_uri = output_dir
+    if resolved_output_uri and is_remote_storage_uri(resolved_output_uri):
+        storage = create_storage(resolved_output_uri)
+        return storage.save_text(
+            text=report_json,
+            relative_path=report_name,
+            content_type="application/json",
+        )
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_path = output_dir / report_name
+    report_path.write_text(report_json, encoding="utf-8")
 
     return report_path
 
