@@ -557,6 +557,15 @@ For `benchmark-matrix`, presets can also provide the model list:
 python -m argus.cli benchmark-matrix --suite-preset mixed_calibration_fast_v1
 ```
 
+Optional webhook alerting can be enabled for gate outcomes:
+
+```bash
+python -m argus.cli benchmark-pipeline \
+  --suite-preset minimax_core_v1 \
+  --alert-webhook https://hooks.example.internal/argus \
+  --alert-on gate_failures
+```
+
 Default run:
 
 ```bash

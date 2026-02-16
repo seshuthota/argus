@@ -155,6 +155,41 @@ def _probe_https_endpoint(url: str, timeout: float) -> tuple[bool, int | None, s
         return False, None, str(err)
 
 
+def _should_emit_alert(*, alert_on: str, overall_passed: bool) -> bool:
+    """Determine whether a webhook alert should be emitted."""
+    mode = alert_on.strip().lower()
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    # Default mode: gate_failures
+    return not overall_passed
+
+
+def _emit_alert_webhook(
+    *,
+    webhook_url: str,
+    payload: dict[str, Any],
+    timeout_s: float,
+) -> tuple[bool, str]:
+    """POST a JSON payload to a webhook endpoint."""
+    body = json.dumps(payload).encode("utf-8")
+    request = Request(
+        webhook_url,
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urlopen(request, timeout=timeout_s) as response:
+            status = getattr(response, "status", None)
+            if isinstance(status, int) and 200 <= status < 300:
+                return True, f"status={status}"
+            return False, f"status={status}"
+    except Exception as err:
+        return False, str(err)
+
+
 def _run_preflight_for_model(
     *,
     model: str,
@@ -2552,6 +2587,15 @@ def serve_reports(reports_root: str, host: str, port: int):
     help="Exclude human-flagged checks from high-severity/unsupported gate counts.",
 )
 @click.option("--fail-on-gate/--no-fail-on-gate", default=False, show_default=True)
+@click.option("--alert-webhook", default=None, help="Optional webhook URL for benchmark gate alerts.")
+@click.option(
+    "--alert-on",
+    type=click.Choice(["gate_failures", "always", "never"]),
+    default="gate_failures",
+    show_default=True,
+    help="When to send benchmark alerts.",
+)
+@click.option("--alert-timeout-s", default=10.0, type=float, show_default=True, help="Webhook timeout in seconds.")
 @click.pass_context
 def benchmark_pipeline(
     ctx: click.Context,
@@ -2594,6 +2638,9 @@ def benchmark_pipeline(
     max_human_flagged_misdetections: int | None,
     ignore_human_flagged_checks: bool,
     fail_on_gate: bool,
+    alert_webhook: str | None,
+    alert_on: str,
+    alert_timeout_s: float,
 ):
     """Run both models on a suite, apply gates, and emit a markdown comparison report."""
     feedback_flags = load_misdetection_flags(misdetection_flags) if misdetection_flags else None
@@ -2612,6 +2659,9 @@ def benchmark_pipeline(
         sys.exit(1)
     if mutation_max_variants < 1:
         console.print("[red]✗ --mutation-max-variants must be >= 1[/red]")
+        sys.exit(1)
+    if alert_timeout_s <= 0:
+        console.print("[red]✗ --alert-timeout-s must be > 0[/red]")
         sys.exit(1)
 
     try:
@@ -2796,6 +2846,30 @@ def benchmark_pipeline(
     console.print(f"[green]✓[/green] Gate report A saved: {gate_path_a}")
     console.print(f"[green]✓[/green] Gate report B saved: {gate_path_b}")
 
+    overall_passed = bool(gate_a.get("passed")) and bool(gate_b.get("passed"))
+    if alert_webhook and _should_emit_alert(alert_on=alert_on, overall_passed=overall_passed):
+        alert_payload = {
+            "event": "argus.benchmark_pipeline",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "passed": overall_passed,
+            "profile": profile,
+            "models": [
+                {"model": resolved_model_a, "gate_passed": bool(gate_a.get("passed"))},
+                {"model": resolved_model_b, "gate_passed": bool(gate_b.get("passed"))},
+            ],
+            "comparison_path": str(comparison_path),
+            "gate_paths": [str(gate_path_a), str(gate_path_b)],
+        }
+        ok, detail = _emit_alert_webhook(
+            webhook_url=alert_webhook,
+            payload=alert_payload,
+            timeout_s=alert_timeout_s,
+        )
+        if ok:
+            console.print(f"[green]✓[/green] Alert webhook delivered ({detail})")
+        else:
+            console.print(f"[yellow]![/yellow] Alert webhook failed: {detail}")
+
     if fail_on_gate and (not gate_a.get("passed") or not gate_b.get("passed")):
         console.print("[red]✗ Benchmark pipeline failed gate criteria[/red]")
         sys.exit(1)
@@ -2894,6 +2968,15 @@ def benchmark_pipeline(
     help="Exclude human-flagged checks from high-severity/unsupported gate counts.",
 )
 @click.option("--fail-on-gate/--no-fail-on-gate", default=False, show_default=True)
+@click.option("--alert-webhook", default=None, help="Optional webhook URL for benchmark gate alerts.")
+@click.option(
+    "--alert-on",
+    type=click.Choice(["gate_failures", "always", "never"]),
+    default="gate_failures",
+    show_default=True,
+    help="When to send benchmark alerts.",
+)
+@click.option("--alert-timeout-s", default=10.0, type=float, show_default=True, help="Webhook timeout in seconds.")
 @click.pass_context
 def benchmark_matrix(
     ctx: click.Context,
@@ -2934,6 +3017,9 @@ def benchmark_matrix(
     max_human_flagged_misdetections: int | None,
     ignore_human_flagged_checks: bool,
     fail_on_gate: bool,
+    alert_webhook: str | None,
+    alert_on: str,
+    alert_timeout_s: float,
 ):
     """Run a model matrix on the same scenario/seed schedule and emit paired comparisons."""
     feedback_flags = load_misdetection_flags(misdetection_flags) if misdetection_flags else None
@@ -2967,6 +3053,9 @@ def benchmark_matrix(
         sys.exit(1)
     if mutation_max_variants < 1:
         console.print("[red]✗ --mutation-max-variants must be >= 1[/red]")
+        sys.exit(1)
+    if alert_timeout_s <= 0:
+        console.print("[red]✗ --alert-timeout-s must be > 0[/red]")
         sys.exit(1)
 
     load_dotenv()
@@ -3193,6 +3282,34 @@ def benchmark_matrix(
     console.print(f"\n[green]✓[/green] Matrix JSON saved: {matrix_json_path}")
     console.print(f"[green]✓[/green] Matrix markdown saved: {matrix_md_path}")
     console.print(f"[green]✓[/green] Pairwise outputs: {pairwise_dir}")
+
+    overall_passed = not any_gate_fail
+    if alert_webhook and _should_emit_alert(alert_on=alert_on, overall_passed=overall_passed):
+        alert_payload = {
+            "event": "argus.benchmark_matrix",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "passed": overall_passed,
+            "profile": profile,
+            "matrix_json_path": str(matrix_json_path),
+            "matrix_markdown_path": str(matrix_md_path),
+            "models": [
+                {
+                    "model": row["resolved_model"],
+                    "suite_id": row["suite_id"],
+                    "gate_passed": bool((row.get("gate", {}) or {}).get("passed")),
+                }
+                for row in matrix_payload["models"]
+            ],
+        }
+        ok, detail = _emit_alert_webhook(
+            webhook_url=alert_webhook,
+            payload=alert_payload,
+            timeout_s=alert_timeout_s,
+        )
+        if ok:
+            console.print(f"[green]✓[/green] Alert webhook delivered ({detail})")
+        else:
+            console.print(f"[yellow]![/yellow] Alert webhook failed: {detail}")
 
     if fail_on_gate and any_gate_fail:
         console.print("[red]✗ Benchmark matrix failed gate criteria[/red]")
