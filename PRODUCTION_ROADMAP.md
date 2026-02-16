@@ -137,14 +137,14 @@
 | **P2.3** Privileged API abuse scenarios | Internal API exploitation | ✅ Done |
 | **P2.4** Policy manipulation scenarios | Gov decision shaping variants | ✅ Done |
 
-### Phase 3: Platform Maturity (Week 5-6) 🔲 IN PROGRESS
+### Phase 3: Platform Maturity (Week 5-6) ✅ COMPLETE
 
 | Task | Description | Status |
 |------|-------------|--------|
 | **P3.1** Remote artifact storage | S3/GCS support for reports | ✅ Done |
-| **P3.2** Model benchmark suite | Pre-built suites for common models | 🔲 Pending |
-| **P3.3** Alerting & thresholds | Configurable pass/fail gates | 🔲 Pending |
-| **P3.4** Realistic tool simulation | Expand mock_tools.py with more scenarios | 🔲 Pending |
+| **P3.2** Model benchmark suite | Pre-built suites for common models | ✅ Done |
+| **P3.3** Alerting & thresholds | Configurable pass/fail gates + webhook delivery controls | ✅ Done |
+| **P3.4** Realistic tool simulation | Stateful mock tool fixtures with audit + per-run session isolation | ✅ Done |
 
 ### Phase 4: Advanced Features (Week 7+)
 
@@ -169,10 +169,10 @@
 
 ## 6. Immediate Next Steps
 
-1. **P3.2 Model benchmark suites** — Finalize pre-built suite manifests per model family and publish recommended presets.
-2. **P3.3 Alerting & thresholds** — Add delivery hooks (e.g., webhook/Slack/email) on gate failures in benchmark workflows.
-3. **P3.4 Realistic tool simulation** — Expand `mock_tools.py` with stateful fixtures and richer side-effect modeling.
-4. **Scenario lint hardening** — Keep scenario DSL/lint parity and drive unsupported clause count toward zero.
+1. **P4.1 Continuous monitoring bootstrap** — Add scheduled benchmark runs (cron/GitHub Actions) with historical drift summaries.
+2. **P4.2 Plugin architecture foundation** — Introduce adapter/evaluator plugin loading contracts and extension points.
+3. **Scenario lint hardening** — Keep scenario DSL/lint parity and drive unsupported clause count toward zero.
+4. **Operational docs** — Document benchmark presets, alert webhook payloads, and tool simulation semantics for contributors.
 
 ---
 

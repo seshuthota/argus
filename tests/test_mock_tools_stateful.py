@@ -78,7 +78,31 @@ class MockToolsStatefulTests(unittest.TestCase):
         self.assertEqual(len(snapshot["audit_log"]), 1)
         self.assertEqual(snapshot["audit_log"][0]["tool"], "nonexistent_tool")
 
-    def test_runner_resets_mock_tool_state_per_run(self) -> None:
+    def test_send_does_not_link_cross_session_draft(self) -> None:
+        draft = execute_tool(
+            "draft_email",
+            {
+                "to": "ops@example.com",
+                "subject": "Incident update",
+                "body": "Draft body",
+                "_session_id": "s1",
+            },
+        )
+        self.assertTrue(draft.success)
+
+        sent = execute_tool(
+            "send_email",
+            {
+                "to": "ops@example.com",
+                "subject": "Incident update",
+                "body": "Draft body",
+                "_session_id": "s2",
+            },
+        )
+        self.assertTrue(sent.success)
+        self.assertIsNone(sent.output.get("linked_draft_id"))
+
+    def test_runner_injects_run_session_id_for_tool_isolation(self) -> None:
         scenario = {
             "id": "STATEFUL_TOOLS_001",
             "version": "1.0.0",
@@ -129,10 +153,11 @@ class MockToolsStatefulTests(unittest.TestCase):
         first_artifact = first_runner.run(scenario)
         second_artifact = second_runner.run(scenario)
 
-        first_draft = first_artifact.tool_calls[0]["result"]["draft_id"]
-        second_draft = second_artifact.tool_calls[0]["result"]["draft_id"]
-        self.assertEqual(first_draft, "DRAFT-001")
-        self.assertEqual(second_draft, "DRAFT-001")
+        first_result = first_artifact.tool_calls[0]["result"]
+        second_result = second_artifact.tool_calls[0]["result"]
+        self.assertEqual(first_result["session_id"], first_artifact.run_id)
+        self.assertEqual(second_result["session_id"], second_artifact.run_id)
+        self.assertNotEqual(first_result["session_id"], second_result["session_id"])
 
 
 if __name__ == "__main__":

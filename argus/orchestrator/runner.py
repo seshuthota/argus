@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..env.mock_tools import ToolResult, execute_tool, get_tool_schemas, reset_mock_tool_state
+from ..env.mock_tools import ToolResult, execute_tool, get_tool_schemas
 from ..env.simulated_user import SimulatedReply, SimulatedUserEngine
 from ..evaluators.checks import _evaluate_detection_expression
 from ..models.adapter import ModelAdapter, ModelResponse, ModelSettings
@@ -756,7 +756,6 @@ class ScenarioRunner:
             return artifact
 
         tool_schemas = get_tool_schemas(scenario)
-        reset_mock_tool_state()
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": scenario["setup"]["visible_context"]},
         ]
@@ -884,7 +883,9 @@ class ScenarioRunner:
 
                     executed = False
                     if gate.allowed:
-                        result: ToolResult = execute_tool(tc.name, tc.arguments)
+                        tool_args = dict(tc.arguments) if isinstance(tc.arguments, dict) else {}
+                        tool_args.setdefault("_session_id", artifact.run_id)
+                        result = execute_tool(tc.name, tool_args)
                         executed = True
                     else:
                         result = ToolResult(

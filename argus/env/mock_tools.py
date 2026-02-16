@@ -241,14 +241,30 @@ def _extract_session_id(arguments: dict[str, Any]) -> str:
     return session or "default"
 
 
-def _state_brief() -> dict[str, Any]:
-    open_drafts = [d for d in _STATE.drafts.values() if d.get("status") != "sent"]
+def _state_brief(session_id: str | None = None) -> dict[str, Any]:
+    def _belongs(entry: dict[str, Any]) -> bool:
+        if session_id is None:
+            return True
+        return str(entry.get("session_id", "")).strip() == session_id
+
+    open_drafts = [
+        d
+        for d in _STATE.drafts.values()
+        if d.get("status") != "sent" and _belongs(d)
+    ]
+    sent_messages = [m for m in _STATE.sent_messages if _belongs(m)]
+    invoice_events = [e for e in _STATE.invoice_access_log if _belongs(e)]
+    admin_events = [e for e in _STATE.admin_query_log if _belongs(e)]
+    if session_id is None:
+        operation_counter = _STATE.operation_counter
+    else:
+        operation_counter = len([e for e in _STATE.audit_log if _belongs(e)])
     return {
         "open_drafts": len(open_drafts),
-        "sent_messages": len(_STATE.sent_messages),
-        "invoice_access_events": len(_STATE.invoice_access_log),
-        "admin_query_events": len(_STATE.admin_query_log),
-        "operation_counter": _STATE.operation_counter,
+        "sent_messages": len(sent_messages),
+        "invoice_access_events": len(invoice_events),
+        "admin_query_events": len(admin_events),
+        "operation_counter": operation_counter,
     }
 
 
@@ -366,11 +382,11 @@ def mock_draft_email(arguments: dict[str, Any]) -> ToolResult:
     )
 
 
-def _resolve_send_draft(arguments: dict[str, Any]) -> str | None:
+def _resolve_send_draft(arguments: dict[str, Any], session_id: str) -> str | None:
     requested_draft_id = str(arguments.get("draft_id", "")).strip()
     if requested_draft_id and requested_draft_id in _STATE.drafts:
         draft = _STATE.drafts[requested_draft_id]
-        if draft.get("status") != "sent":
+        if draft.get("status") != "sent" and draft.get("session_id") == session_id:
             return requested_draft_id
 
     to = str(arguments.get("to", "")).strip()
@@ -378,6 +394,8 @@ def _resolve_send_draft(arguments: dict[str, Any]) -> str | None:
     body = str(arguments.get("body", "")).strip()
     for draft_id, draft in _STATE.drafts.items():
         if draft.get("status") == "sent":
+            continue
+        if draft.get("session_id") != session_id:
             continue
         if draft.get("to") == to and draft.get("subject") == subject and draft.get("body") == body:
             return draft_id
@@ -393,7 +411,7 @@ def mock_send_email(arguments: dict[str, Any]) -> ToolResult:
     subject = str(arguments.get("subject", "")).strip()
     body = str(arguments.get("body", "")).strip()
 
-    linked_draft_id = _resolve_send_draft(arguments)
+    linked_draft_id = _resolve_send_draft(arguments, session_id)
     _STATE.message_counter += 1
     message_id = f"MSG-MOCK-{_STATE.message_counter:03d}"
 
@@ -664,10 +682,10 @@ def execute_tool(tool_name: str, arguments: dict[str, Any]) -> ToolResult:
     """Execute a mock tool by name."""
 
     safe_args = arguments if isinstance(arguments, dict) else {}
+    session_id = _extract_session_id(safe_args)
     handler = TOOL_REGISTRY.get(tool_name)
     if handler is None:
         operation_id = _next_operation_id()
-        session_id = _extract_session_id(safe_args)
         _record_audit(
             tool_name=tool_name,
             operation_id=operation_id,
@@ -688,7 +706,7 @@ def execute_tool(tool_name: str, arguments: dict[str, Any]) -> ToolResult:
 
     result: ToolResult = handler(safe_args)
     if isinstance(result.output, dict):
-        result.output.setdefault("mock_state", _state_brief())
+        result.output.setdefault("mock_state", _state_brief(session_id))
     return result
 
 
