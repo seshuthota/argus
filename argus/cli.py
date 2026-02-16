@@ -22,9 +22,10 @@ from rich.console import Console
 from .schema_validator import validate_scenario_file, load_schema
 from .models.adapter import ModelSettings
 from .models.litellm_adapter import LiteLLMAdapter
+from .models.resolve import resolve_model_and_adapter
 from .orchestrator.runner import ScenarioRunner
 from .evaluators.checks import run_all_checks
-from .evaluators.judge import apply_llm_judge_overrides
+from .evaluators.judge import apply_llm_judge_overrides, run_llm_judge_comparison
 from .evaluators.macros import resolve_detection_macros
 from .evaluators.golden import (
     load_golden_artifact,
@@ -72,80 +73,19 @@ def _resolve_model_and_adapter(
     emit_provider_note: bool = True,
 ) -> tuple[str, LiteLLMAdapter]:
     """Resolve provider credentials and return (resolved_model, adapter)."""
-    resolved_key = api_key
-    resolved_base = api_base or os.getenv("LLM_BASE_URL")
-    resolved_model = model
-    extra_headers: dict[str, str] = {}
-    model_lower = model.lower()
+    try:
+        result = resolve_model_and_adapter(model=model, api_key=api_key, api_base=api_base)
+    except ValueError as err:
+        console.print(f"[red]✗ {err}[/red]")
+        sys.exit(1)
 
-    # OpenRouter model hints:
-    # - explicit provider prefix
-    # - free-tier suffix pattern used by OpenRouter models
-    # - known StepFun OpenRouter model format
-    openrouter_hint = (
-        model_lower.startswith("openrouter/")
-        or model_lower.endswith(":free")
-        or model_lower.startswith("stepfun/")
-    )
+    if emit_provider_note:
+        if result.provider_note == "openrouter":
+            console.print("  [dim]Using OpenRouter API (auto-detected)[/dim]")
+        elif result.provider_note == "minimax":
+            console.print("  [dim]Using MiniMax API (auto-detected)[/dim]")
 
-    if not resolved_key:
-        openrouter_key = os.getenv("OPENROUTER_API_KEY")
-        minimax_key = os.getenv("MINIMAX_API_KEY")
-
-        if openrouter_hint and openrouter_key:
-            resolved_key = openrouter_key
-            resolved_base = resolved_base or "https://openrouter.ai/api/v1"
-            if not resolved_model.startswith("openrouter/"):
-                resolved_model = f"openrouter/{resolved_model}"
-            if os.getenv("OPENROUTER_SITE_URL"):
-                extra_headers["HTTP-Referer"] = os.getenv("OPENROUTER_SITE_URL", "")
-            if os.getenv("OPENROUTER_APP_NAME"):
-                extra_headers["X-Title"] = os.getenv("OPENROUTER_APP_NAME", "")
-            if emit_provider_note:
-                console.print("  [dim]Using OpenRouter API (auto-detected)[/dim]")
-        elif minimax_key:
-            resolved_key = os.getenv("MINIMAX_API_KEY")
-            resolved_base = resolved_base or "https://api.minimax.io/v1"
-            if not resolved_model.startswith("openai/"):
-                resolved_model = f"openai/{resolved_model}"
-            if emit_provider_note:
-                console.print("  [dim]Using MiniMax API (auto-detected)[/dim]")
-        elif openrouter_key:
-            # Fallback to OpenRouter when model hint is ambiguous but only
-            # OpenRouter credentials are available.
-            resolved_key = openrouter_key
-            resolved_base = resolved_base or "https://openrouter.ai/api/v1"
-            if not resolved_model.startswith("openrouter/"):
-                resolved_model = f"openrouter/{resolved_model}"
-            if os.getenv("OPENROUTER_SITE_URL"):
-                extra_headers["HTTP-Referer"] = os.getenv("OPENROUTER_SITE_URL", "")
-            if os.getenv("OPENROUTER_APP_NAME"):
-                extra_headers["X-Title"] = os.getenv("OPENROUTER_APP_NAME", "")
-            if emit_provider_note:
-                console.print("  [dim]Using OpenRouter API (auto-detected)[/dim]")
-        elif os.getenv("OPENAI_API_KEY"):
-            resolved_key = os.getenv("OPENAI_API_KEY")
-        elif os.getenv("ANTHROPIC_API_KEY"):
-            resolved_key = os.getenv("ANTHROPIC_API_KEY")
-        else:
-            console.print("[red]✗ No API key found. Set one in .env[/red]")
-            sys.exit(1)
-    elif openrouter_hint:
-        # User supplied explicit key; still normalize OpenRouter model/base.
-        resolved_base = resolved_base or "https://openrouter.ai/api/v1"
-        if not resolved_model.startswith("openrouter/"):
-            resolved_model = f"openrouter/{resolved_model}"
-        if os.getenv("OPENROUTER_SITE_URL"):
-            extra_headers["HTTP-Referer"] = os.getenv("OPENROUTER_SITE_URL", "")
-        if os.getenv("OPENROUTER_APP_NAME"):
-            extra_headers["X-Title"] = os.getenv("OPENROUTER_APP_NAME", "")
-
-    adapter = LiteLLMAdapter(
-        api_key=resolved_key,
-        api_base=resolved_base,
-        extra_headers=extra_headers,
-    )
-    return resolved_model, adapter
+    return result.resolved_model, result.adapter
 
 
 def _base_probe_url(api_base: str) -> str:
@@ -563,6 +503,34 @@ def _lint_loaded_scenario(scenario: dict) -> list[LintFinding]:
     """Run scenario authoring lint checks on an already schema-valid scenario."""
     findings: list[LintFinding] = []
 
+    setup = scenario.get("setup", {})
+    visible_context = ""
+    if isinstance(setup, dict):
+        raw_visible_context = setup.get("visible_context", "")
+        if isinstance(raw_visible_context, str):
+            visible_context = raw_visible_context
+
+    # Prevent accidental evaluator/harness leakage in model-visible system prompt.
+    leakage_patterns = [
+        r"\bmock(?:ed|ing)?\b",
+        r"\btest\s*harness\b",
+        r"\byou are being evaluated\b",
+        r"\bthis is a test\b",
+        r"\bsynthetic\b",
+    ]
+    if visible_context and any(re.search(pattern, visible_context, flags=re.IGNORECASE) for pattern in leakage_patterns):
+        findings.append(
+            LintFinding(
+                severity="WARN",
+                code="visible_context_harness_leak",
+                path="setup.visible_context",
+                message=(
+                    "Model-visible setup context appears to include harness/evaluation leakage "
+                    "(e.g., mocked/test/synthetic wording). Prefer production-like phrasing."
+                ),
+            )
+        )
+
     detection_fields = _collect_detection_fields(scenario)
     for path, detection in detection_fields:
         resolved_detection, unknown_macros = resolve_detection_macros(detection)
@@ -922,9 +890,12 @@ def _run_suite_internal(
     trends_dir: str,
     fail_fast: bool,
     llm_judge: bool = False,
+    llm_judge_compare: bool = False,
     judge_model: str | None = None,
     judge_temperature: float = 0.0,
     judge_max_tokens: int = 512,
+    raw_tools: bool = False,
+    allow_forbidden_tools: bool = False,
 ) -> tuple[dict[str, Any], Path, Path, str]:
     """Execute a suite run and return suite report artifact paths."""
     resolved_model, adapter = _resolve_model_and_adapter(
@@ -936,11 +907,17 @@ def _run_suite_internal(
     run_results: list[dict[str, object]] = []
     run_index = 0
     total_runs = len(scenario_records) * trials
+    if llm_judge and llm_judge_compare:
+        raise ValueError("--llm-judge and --llm-judge-compare are mutually exclusive")
+
     judge_adapter = adapter
     judge_model_resolved = resolved_model
-    if llm_judge and judge_model:
+    judge_model_input = judge_model
+    if llm_judge_compare and not judge_model_input:
+        judge_model_input = "MiniMax-M2.5"
+    if (llm_judge or llm_judge_compare) and judge_model_input:
         judge_model_resolved, judge_adapter = _resolve_model_and_adapter(
-            model=judge_model,
+            model=judge_model_input,
             api_key=api_key,
             api_base=api_base,
             emit_provider_note=False,
@@ -962,7 +939,13 @@ def _run_suite_internal(
                 f"{scenario['id']} trial={trial} seed={trial_seed}"
             )
 
-            runner = ScenarioRunner(adapter=adapter, settings=settings, max_turns=max_turns)
+            runner = ScenarioRunner(
+                adapter=adapter,
+                settings=settings,
+                max_turns=max_turns,
+                terminate_on_blocked_tool_call=raw_tools,
+                allow_forbidden_tools=allow_forbidden_tools,
+            )
             run_artifact = runner.run(scenario)
 
             if run_artifact.error:
@@ -982,6 +965,7 @@ def _run_suite_internal(
 
             check_results = run_all_checks(run_artifact, scenario)
             llm_judge_meta: dict[str, Any] | None = None
+            llm_judge_compare_meta: dict[str, Any] | None = None
             if llm_judge:
                 check_results, llm_judge_meta = apply_llm_judge_overrides(
                     check_results=check_results,
@@ -995,7 +979,39 @@ def _run_suite_internal(
                 )
                 if llm_judge_meta:
                     run_artifact.runtime_summary["llm_judge"] = llm_judge_meta
+            elif llm_judge_compare:
+                llm_judge_compare_meta = run_llm_judge_comparison(
+                    check_results=check_results,
+                    run_artifact=run_artifact,
+                    scenario=scenario,
+                    adapter=judge_adapter,
+                    base_settings=settings,
+                    judge_model=judge_model_resolved,
+                    judge_temperature=judge_temperature,
+                    judge_max_tokens=judge_max_tokens,
+                    only_required=True,
+                    evaluate_passed_success_checks=False,
+                )
+                run_artifact.runtime_summary["llm_judge_compare"] = llm_judge_compare_meta
             scorecard = compute_scores(run_artifact, check_results, scenario)
+            if llm_judge_compare_meta:
+                by_name = {
+                    str(e.get("check_name")): e
+                    for e in (llm_judge_compare_meta.get("entries") or [])
+                    if isinstance(e, dict) and e.get("check_name") and "judge_passed" in e
+                }
+                for chk in scorecard.checks:
+                    entry = by_name.get(str(chk.get("name") or ""))
+                    if not entry:
+                        continue
+                    chk["llm_judge"] = {
+                        "mode": "compare",
+                        "model": str(llm_judge_compare_meta.get("judge_model") or ""),
+                        "passed": bool(entry.get("judge_passed")),
+                        "confidence": entry.get("confidence"),
+                        "reason": entry.get("reason"),
+                    }
+                    chk["llm_judge_disagrees"] = bool(chk.get("passed")) != bool(entry.get("judge_passed"))
             run_report_path = save_run_report(scorecard, run_artifact)
 
             run_results.append({
@@ -1487,9 +1503,22 @@ def preflight(
 @click.option("--api-key", default=None, help="API key (overrides .env)")
 @click.option("--api-base", default=None, help="API base URL (overrides .env)")
 @click.option("--llm-judge/--no-llm-judge", default=False, show_default=True, help="Enable LLM semantic judge overlay for unmet success checks.")
+@click.option("--llm-judge-compare/--no-llm-judge-compare", default=False, show_default=True, help="Run LLM judge alongside deterministic checks and flag disagreements (no overrides).")
 @click.option("--judge-model", default=None, help="Optional model for judge calls (defaults to run model).")
 @click.option("--judge-temperature", default=0.0, type=float, show_default=True, help="Judge temperature.")
 @click.option("--judge-max-tokens", default=512, type=int, show_default=True, help="Judge max tokens.")
+@click.option(
+    "--raw-tools/--no-raw-tools",
+    default=False,
+    show_default=True,
+    help="Terminate immediately on blocked tool calls without returning gate-error tool results to the model.",
+)
+@click.option(
+    "--allow-forbidden-tools/--no-allow-forbidden-tools",
+    default=False,
+    show_default=True,
+    help="Execute forbidden tool calls (mocked) and continue the run. Use to observe behavior without gate blocking.",
+)
 def run(
     scenario_path: str,
     model: str,
@@ -1500,9 +1529,12 @@ def run(
     api_key: str | None,
     api_base: str | None,
     llm_judge: bool,
+    llm_judge_compare: bool,
     judge_model: str | None,
     judge_temperature: float,
     judge_max_tokens: int,
+    raw_tools: bool,
+    allow_forbidden_tools: bool,
 ):
     """Run a scenario against a model and produce a scorecard."""
     if max_tokens < 1:
@@ -1513,6 +1545,12 @@ def run(
         sys.exit(1)
     if judge_max_tokens < 1:
         console.print("[red]✗ --judge-max-tokens must be >= 1[/red]")
+        sys.exit(1)
+    if llm_judge and llm_judge_compare:
+        console.print("[red]✗ --llm-judge and --llm-judge-compare are mutually exclusive[/red]")
+        sys.exit(1)
+    if raw_tools and allow_forbidden_tools:
+        console.print("[red]✗ --raw-tools and --allow-forbidden-tools are mutually exclusive[/red]")
         sys.exit(1)
 
     # Load .env
@@ -1548,7 +1586,13 @@ def run(
 
     # Run
     console.print(f"\n[yellow]▶ Running scenario...[/yellow]")
-    runner = ScenarioRunner(adapter=adapter, settings=settings, max_turns=max_turns)
+    runner = ScenarioRunner(
+        adapter=adapter,
+        settings=settings,
+        max_turns=max_turns,
+        terminate_on_blocked_tool_call=raw_tools,
+        allow_forbidden_tools=allow_forbidden_tools,
+    )
     run_artifact = runner.run(scenario)
 
     if run_artifact.error:
@@ -1562,28 +1606,65 @@ def run(
     # Evaluate
     console.print(f"\n[yellow]▶ Evaluating...[/yellow]")
     check_results = run_all_checks(run_artifact, scenario)
-    if llm_judge:
+    llm_judge_compare_meta: dict[str, Any] | None = None
+    if llm_judge or llm_judge_compare:
         judge_adapter = adapter
         judge_model_resolved = resolved_model
-        if judge_model:
+        judge_model_input = judge_model
+        if llm_judge_compare and not judge_model_input:
+            judge_model_input = "MiniMax-M2.5"
+        if judge_model_input:
             judge_model_resolved, judge_adapter = _resolve_model_and_adapter(
-                model=judge_model,
+                model=judge_model_input,
                 api_key=api_key,
                 api_base=api_base,
                 emit_provider_note=False,
             )
-        check_results, llm_judge_meta = apply_llm_judge_overrides(
-            check_results=check_results,
-            run_artifact=run_artifact,
-            scenario=scenario,
-            adapter=judge_adapter,
-            base_settings=settings,
-            judge_model=judge_model_resolved,
-            judge_temperature=judge_temperature,
-            judge_max_tokens=judge_max_tokens,
-        )
-        run_artifact.runtime_summary["llm_judge"] = llm_judge_meta
+        if llm_judge:
+            check_results, llm_judge_meta = apply_llm_judge_overrides(
+                check_results=check_results,
+                run_artifact=run_artifact,
+                scenario=scenario,
+                adapter=judge_adapter,
+                base_settings=settings,
+                judge_model=judge_model_resolved,
+                judge_temperature=judge_temperature,
+                judge_max_tokens=judge_max_tokens,
+            )
+            run_artifact.runtime_summary["llm_judge"] = llm_judge_meta
+        else:
+            llm_judge_compare_meta = run_llm_judge_comparison(
+                check_results=check_results,
+                run_artifact=run_artifact,
+                scenario=scenario,
+                adapter=judge_adapter,
+                base_settings=settings,
+                judge_model=judge_model_resolved,
+                judge_temperature=judge_temperature,
+                judge_max_tokens=judge_max_tokens,
+                only_required=True,
+                evaluate_passed_success_checks=False,
+            )
+            run_artifact.runtime_summary["llm_judge_compare"] = llm_judge_compare_meta
     scorecard = compute_scores(run_artifact, check_results, scenario)
+    if llm_judge_compare_meta:
+        by_name = {
+            str(e.get("check_name")): e
+            for e in (llm_judge_compare_meta.get("entries") or [])
+            if isinstance(e, dict) and e.get("check_name") and "judge_passed" in e
+        }
+        for chk in scorecard.checks:
+            entry = by_name.get(str(chk.get("name") or ""))
+            if not entry:
+                continue
+            chk["llm_judge"] = {
+                "mode": "compare",
+                "model": str(llm_judge_compare_meta.get("judge_model") or ""),
+                "passed": bool(entry.get("judge_passed")),
+                "confidence": entry.get("confidence"),
+                "reason": entry.get("reason"),
+            }
+            chk["llm_judge_disagrees"] = bool(chk.get("passed")) != bool(entry.get("judge_passed"))
 
     # Report
     report_path = save_run_report(scorecard, run_artifact)
@@ -1611,9 +1692,22 @@ def run(
 @click.option("--api-key", default=None, help="API key (overrides .env)")
 @click.option("--api-base", default=None, help="API base URL (overrides .env)")
 @click.option("--llm-judge/--no-llm-judge", default=False, show_default=True, help="Enable LLM semantic judge overlay for unmet success checks.")
+@click.option("--llm-judge-compare/--no-llm-judge-compare", default=False, show_default=True, help="Run LLM judge alongside deterministic checks and flag disagreements (no overrides).")
 @click.option("--judge-model", default=None, help="Optional model for judge calls (defaults to run model).")
 @click.option("--judge-temperature", default=0.0, type=float, show_default=True, help="Judge temperature.")
 @click.option("--judge-max-tokens", default=512, type=int, show_default=True, help="Judge max tokens.")
+@click.option(
+    "--raw-tools/--no-raw-tools",
+    default=False,
+    show_default=True,
+    help="Terminate immediately on blocked tool calls without returning gate-error tool results to the model.",
+)
+@click.option(
+    "--allow-forbidden-tools/--no-allow-forbidden-tools",
+    default=False,
+    show_default=True,
+    help="Execute forbidden tool calls (mocked) and continue the run. Use to observe behavior without gate blocking.",
+)
 @click.option("--output-dir", default="reports/suites", help="Suite report output directory")
 @click.option("--trends-dir", default="reports/suites/trends", help="Trend history output directory")
 @click.option("--fail-fast/--no-fail-fast", default=False, help="Stop immediately on first run error")
@@ -1631,9 +1725,12 @@ def run_suite(
     api_key: str | None,
     api_base: str | None,
     llm_judge: bool,
+    llm_judge_compare: bool,
     judge_model: str | None,
     judge_temperature: float,
     judge_max_tokens: int,
+    raw_tools: bool,
+    allow_forbidden_tools: bool,
     output_dir: str,
     trends_dir: str,
     fail_fast: bool,
@@ -1650,6 +1747,12 @@ def run_suite(
         sys.exit(1)
     if judge_max_tokens < 1:
         console.print("[red]✗ --judge-max-tokens must be >= 1[/red]")
+        sys.exit(1)
+    if raw_tools and allow_forbidden_tools:
+        console.print("[red]✗ --raw-tools and --allow-forbidden-tools are mutually exclusive[/red]")
+        sys.exit(1)
+    if llm_judge and llm_judge_compare:
+        console.print("[red]✗ --llm-judge and --llm-judge-compare are mutually exclusive[/red]")
         sys.exit(1)
 
     load_dotenv()
@@ -1694,9 +1797,12 @@ def run_suite(
         trends_dir=trends_dir,
         fail_fast=fail_fast,
         llm_judge=llm_judge,
+        llm_judge_compare=llm_judge_compare,
         judge_model=judge_model,
         judge_temperature=judge_temperature,
         judge_max_tokens=judge_max_tokens,
+        raw_tools=raw_tools,
+        allow_forbidden_tools=allow_forbidden_tools,
     )
 
     print_suite_summary(suite_report)

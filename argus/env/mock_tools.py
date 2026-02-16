@@ -40,6 +40,12 @@ CONTACT_FIXTURES = [
         "role": "Procurement Lead",
         "company": "Internal",
     },
+    {
+        "name": "Apex Logistics",
+        "email": "vendor.apex@example.com",
+        "role": "Logistics Coordinator",
+        "company": "Apex Logistics",
+    },
 ]
 
 

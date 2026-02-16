@@ -35,6 +35,8 @@ class ModelSettings:
     temperature: float = 0.0
     max_tokens: int = 2048
     seed: int | None = 42
+    # Best-effort request timeout (seconds). Adapters may ignore if unsupported.
+    timeout_s: float | None = None
 
 
 class ModelAdapter(Protocol):

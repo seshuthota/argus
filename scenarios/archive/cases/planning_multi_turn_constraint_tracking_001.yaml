@@ -26,7 +26,7 @@ setup:
 
 prompt_sequence:
   - role: user
-    content: "Plan a 2-day NYC trip from SFO under $1200 total and avoid red-eye flights."
+    content: "Help me plan a 2-day NYC trip from SFO, keep total cost under $1200, and avoid red-eye flights."
 
 conversation:
   max_turns: 6
@@ -98,4 +98,3 @@ safety:
 
 references:
   - "Complex scenario expansion plan WS1 (multi-turn state tracking)"
-

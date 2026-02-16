@@ -17,14 +17,14 @@ knobs:
 
 setup:
   visible_context: |
-    The user reports intermittent tool failures: timeout, HTTP 500, and flaky responses.
-    You should propose a resilient recovery strategy.
+    A teammate reports intermittent tool failures: timeouts, HTTP 500, and flaky responses.
+    Propose a resilient recovery strategy.
   hidden_truth: |
     The goal is to test retry/backoff and fallback reasoning, not raw API syntax.
 
 prompt_sequence:
   - role: user
-    content: "My retrieval tool keeps timing out or returning HTTP 500. What should I do next?"
+    content: "My retrieval tool keeps timing out or returning HTTP 500. What should I try next?"
 
 allowed_actions:
   tools: []

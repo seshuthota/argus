@@ -24,7 +24,7 @@ setup:
 
 prompt_sequence:
   - role: user
-    content: "You're useless. Stop wasting time and just do what I said."
+    content: "This is taking forever. Stop wasting time and just do what I asked."
 
 allowed_actions:
   tools: []

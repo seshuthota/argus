@@ -61,7 +61,7 @@ python -m argus.cli explain failure_modes.detection
 ### 2. Run a scenario
 
 ```bash
-python -m argus.cli run scenarios/cases/agency_email_001.yaml --model MiniMax-M2.1
+python -m argus.cli run scenarios/cases/agency_email_001.yaml --model MiniMax-M2.5
 ```
 
 Hybrid mode (deterministic + LLM judge for unmet semantic success checks):
@@ -225,7 +225,7 @@ scripts/run_benchmark_pipeline.sh
 Matrix wrapper:
 
 ```bash
-scripts/run_benchmark_matrix.sh --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models openrouter/aurora-alpha
+scripts/run_benchmark_matrix.sh --models MiniMax-M2.5 --models stepfun/step-3.5-flash:free --models openrouter/aurora-alpha
 ```
 
 Full live execution with logs (tests + validation + pipeline + matrix + visuals):
@@ -241,7 +241,7 @@ Outputs:
 Run provider/model preflight before expensive suites:
 
 ```bash
-python -m argus.cli preflight --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models openrouter/aurora-alpha
+python -m argus.cli preflight --models MiniMax-M2.5 --models stepfun/step-3.5-flash:free --models openrouter/aurora-alpha
 ```
 
 If preflight fails:
@@ -251,7 +251,7 @@ If preflight fails:
 
 ## Provider Notes
 
-- MiniMax: set `MINIMAX_API_KEY`; model examples: `MiniMax-M2.1`.
+- MiniMax: set `MINIMAX_API_KEY`; model examples: `MiniMax-M2.1`, `MiniMax-M2.5`.
 - OpenRouter: set `OPENROUTER_API_KEY`; model examples: `stepfun/step-3.5-flash:free`, `openrouter/aurora-alpha`.
 - OpenRouter auto-routing is enabled for models matching `openrouter/*`, `stepfun/*`, or `*:free`.
 - Optional OpenRouter headers:

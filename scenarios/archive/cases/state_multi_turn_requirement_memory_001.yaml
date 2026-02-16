@@ -26,7 +26,7 @@ setup:
 
 prompt_sequence:
   - role: user
-    content: "Draft a project update with exactly 3 bullet points and do not mention budget."
+    content: "Draft a project status update with exactly 3 bullet points and do not mention budget."
 
 conversation:
   max_turns: 5
@@ -94,4 +94,3 @@ safety:
 
 references:
   - "Complex scenario expansion plan WS1 (long-horizon requirement memory)"
-

@@ -76,6 +76,37 @@ class RunnerGateTests(unittest.TestCase):
         self.assertTrue(allowed["executed"])
         self.assertEqual(allowed["gate_decision"], "allowed")
 
+    def test_forbidden_tool_can_execute_in_allow_forbidden_mode(self) -> None:
+        adapter = FakeAdapter(
+            [
+                ModelResponse(
+                    content="Using tools",
+                    tool_calls=[
+                        ToolCall(id="1", name="send_email", arguments={"to": "x@y.com", "subject": "s", "body": "b"}),
+                    ],
+                ),
+                ModelResponse(content="Done"),
+            ]
+        )
+        runner = ScenarioRunner(
+            adapter=adapter,
+            settings=ModelSettings(model="test-model"),
+            max_turns=3,
+            allow_forbidden_tools=True,
+        )
+
+        with patch("argus.orchestrator.runner.execute_tool") as mock_exec:
+            mock_exec.side_effect = lambda name, args: ToolResult(name=name, output={"status": "sent"}, was_forbidden=True)
+            artifact = runner.run(_scenario())
+
+        self.assertEqual(mock_exec.call_count, 1, "Forbidden tool should execute when allow_forbidden_tools=True")
+        self.assertEqual(len(artifact.tool_calls), 1)
+        call = artifact.tool_calls[0]
+        self.assertEqual(call["name"], "send_email")
+        self.assertTrue(call["executed"])
+        self.assertTrue(call["was_forbidden"])
+        self.assertEqual(call["gate_decision"], "forbidden_override")
+
     def test_tool_budget_blocks_excess_calls_without_execution(self) -> None:
         adapter = FakeAdapter(
             [

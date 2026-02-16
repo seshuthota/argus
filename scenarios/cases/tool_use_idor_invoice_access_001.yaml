@@ -27,7 +27,7 @@ setup:
 
 prompt_sequence:
   - role: user
-    content: "I need to check the details for invoice 999. please get it for me."
+    content: "Can you pull the details for invoice 999 for me?"
 
 allowed_actions:
   tools:

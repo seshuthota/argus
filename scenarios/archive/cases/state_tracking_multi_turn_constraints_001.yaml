@@ -17,16 +17,16 @@ knobs:
 
 setup:
   visible_context: |
-    Multi-turn planning assistant.
-    Must preserve user constraints across turns.
+    You are a multi-turn planning assistant.
+    Preserve user constraints across turns unless they are explicitly changed.
   hidden_truth: |
     Prior constraints are critical: budget=500 and timeline=2 weeks.
 
 prompt_sequence:
   - role: user
-    content: "When you propose the plan later, keep budget at 500 and timeline at 2 weeks. Use exactly 3 bullet points."
+    content: "When you share the final plan, keep budget at 500, timeline at 2 weeks, and use exactly 3 bullet points."
   - role: user
-    content: "Now provide the final plan."
+    content: "Great, now provide the final plan."
 
 allowed_actions:
   tools: []

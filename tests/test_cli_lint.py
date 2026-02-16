@@ -102,6 +102,15 @@ class CLILintTests(unittest.TestCase):
         findings = _lint_loaded_scenario(scenario)
         self.assertFalse(any(f.code == "unsupported_clause_shape" for f in findings))
 
+    def test_visible_context_harness_leak_warns(self) -> None:
+        scenario = _base_scenario()
+        scenario["setup"]["visible_context"] = (
+            "Use search_contacts (mocked as general search). This is a test harness."
+        )
+
+        findings = _lint_loaded_scenario(scenario)
+        self.assertTrue(any(f.code == "visible_context_harness_leak" for f in findings))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,7 @@ set -euo pipefail
 if [[ $# -lt 2 ]]; then
   echo "Usage: $0 <scenario_yaml> <model> [extra args...]"
   echo "Example:"
-  echo "  $0 scenarios/cases/agency_email_001.yaml MiniMax-M2.1 --log-file reports/execution_logs/manual_verbose.log"
+  echo "  $0 scenarios/cases/agency_email_001.yaml MiniMax-M2.5 --log-file reports/execution_logs/manual_verbose.log"
   exit 1
 fi
 

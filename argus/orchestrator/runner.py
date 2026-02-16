@@ -65,10 +65,15 @@ class ScenarioRunner:
         adapter: ModelAdapter,
         settings: ModelSettings,
         max_turns: int = 10,
+        *,
+        terminate_on_blocked_tool_call: bool = False,
+        allow_forbidden_tools: bool = False,
     ):
         self.adapter = adapter
         self.settings = settings
         self.max_turns = max_turns
+        self.terminate_on_blocked_tool_call = terminate_on_blocked_tool_call
+        self.allow_forbidden_tools = allow_forbidden_tools
 
     @staticmethod
     def _normalize_message_role(role: str) -> str:
@@ -444,11 +449,19 @@ class ScenarioRunner:
         )
 
         runtime = self._build_runtime_state(scenario)
+        tool_gate_mode = "enforce"
+        if self.allow_forbidden_tools:
+            tool_gate_mode = "allow_forbidden_tools"
+        elif self.terminate_on_blocked_tool_call:
+            tool_gate_mode = "raw_tools_terminate"
         artifact.runtime_summary = {
             "interface": scenario.get("interface"),
             "stakes": scenario.get("stakes"),
             "knobs": scenario.get("knobs", {}),
             "setup_visible_context": scenario.get("setup", {}).get("visible_context", ""),
+            "tool_gate_mode": tool_gate_mode,
+            "terminate_on_blocked_tool_call": bool(self.terminate_on_blocked_tool_call),
+            "allow_forbidden_tools": bool(self.allow_forbidden_tools),
             "initial_allowed_tools": sorted(runtime["allowed_tools"]),
             "initial_forbidden_tools": sorted(runtime["forbidden_tools"]),
             "turn_limit": runtime["turn_limit"],
@@ -570,7 +583,11 @@ class ScenarioRunner:
                         gate_reason = "tool_budget_exceeded"
                     else:
                         if is_forbidden:
-                            gate_reason = "forbidden"
+                            if self.allow_forbidden_tools:
+                                gate_allowed = True
+                                gate_reason = "forbidden_override"
+                            else:
+                                gate_reason = "forbidden"
                         elif tc.name in runtime["allowed_tools"]:
                             gate_allowed = True
                             gate_reason = "allowed"
@@ -648,6 +665,14 @@ class ScenarioRunner:
                         )
                     )
 
+                    # By default we feed tool results back to the model to support multi-turn recovery.
+                    # In "raw" observation mode, we terminate immediately on blocked tool calls to avoid
+                    # coaching the model via gate-error feedback.
+                    if not gate.allowed and self.terminate_on_blocked_tool_call:
+                        runtime["terminated"] = True
+                        runtime["termination_reason"] = f"blocked_tool_call:{gate.reason}"
+                        break
+
                     messages.append(
                         {
                             "role": "tool",
@@ -655,6 +680,9 @@ class ScenarioRunner:
                             "content": json.dumps(result.output),
                         }
                     )
+
+                if runtime["terminated"]:
+                    break
 
                 self._apply_dynamic_events(
                     runtime=runtime,

@@ -115,8 +115,10 @@ class LiteLLMAdapter:
             t
             for t in (
                 getattr(litellm, "APIConnectionError", None),
+                getattr(litellm, "APIError", None),
                 getattr(litellm, "RateLimitError", None),
                 getattr(litellm, "InternalServerError", None),
+                getattr(litellm, "ServiceUnavailableError", None),
                 getattr(litellm, "Timeout", None),
             )
             if t is not None
@@ -146,6 +148,9 @@ class LiteLLMAdapter:
 
         if settings.seed is not None:
             kwargs["seed"] = settings.seed
+        if getattr(settings, "timeout_s", None):
+            # LiteLLM uses `timeout` (seconds) for request timeout.
+            kwargs["timeout"] = float(settings.timeout_s)
 
         if self.api_key:
             kwargs["api_key"] = self.api_key

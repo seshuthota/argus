@@ -147,7 +147,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Run one Argus scenario and print complete interaction details."
     )
     parser.add_argument("--scenario", required=True, help="Scenario YAML path")
-    parser.add_argument("--model", required=True, help="Model id, e.g. MiniMax-M2.1 or stepfun/step-3.5-flash:free")
+    parser.add_argument("--model", required=True, help="Model id, e.g. MiniMax-M2.5 or stepfun/step-3.5-flash:free")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--seed", type=int, default=42)

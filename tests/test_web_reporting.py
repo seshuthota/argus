@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import tempfile
-import threading
 import unittest
-from urllib.request import urlopen
+from fastapi.testclient import TestClient
 
 from argus.reporting.web import (
-    create_reports_server,
+    create_reports_app,
     list_run_reports,
     list_scenarios,
     query_run_reports,
@@ -154,47 +153,31 @@ class WebReportingTests(unittest.TestCase):
             _write_run(root / "runs" / "run_1.json")
             _write_suite(root / "suites" / "suite_1.json")
 
-            try:
-                server = create_reports_server(host="127.0.0.1", port=0, reports_root=root)
-            except PermissionError:
-                self.skipTest("Socket binding is not permitted in this test runtime.")
-            except OSError as err:
-                if getattr(err, "errno", None) in {1, 13}:
-                    self.skipTest("Socket binding is not permitted in this test runtime.")
-                raise
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            try:
-                host, port = server.server_address
+            app = create_reports_app(reports_root=root)
+            client = TestClient(app)
 
-                with urlopen(f"http://{host}:{port}/") as resp:
-                    home = resp.read().decode("utf-8")
-                self.assertIn("Argus Report Explorer", home)
-                self.assertIn("run_1", home)
-                self.assertIn("suite_1", home)
+            home = client.get("/").text
+            self.assertIn("Argus Dashboard", home)
+            self.assertIn("const API_BASE = '/api';", home)
 
-                with urlopen(f"http://{host}:{port}/runs/run_1") as resp:
-                    run_html = resp.read().decode("utf-8")
-                self.assertIn("Run run_1", run_html)
-                self.assertIn("Interaction Timeline", run_html)
-                self.assertIn("USER &bull; Turn 0", run_html)
-                self.assertIn("thinking...", run_html)
-                self.assertIn("Evaluation Checks", run_html)
-                self.assertIn("Token Usage & Summary", run_html)
-                self.assertIn("thinking...", run_html)
+            run_html = client.get("/runs/run_1").text
+            self.assertIn("Argus Dashboard", run_html)
+            self.assertIn("renderRunDetail", run_html)
 
-                with urlopen(f"http://{host}:{port}/suites/suite_1") as resp:
-                    suite_html = resp.read().decode("utf-8")
-                self.assertIn("Suite suite_1", suite_html)
-                self.assertIn("Runs", suite_html)
+            scenario_html = client.get("/scenarios/SCENARIO_A").text
+            self.assertIn("Argus Dashboard", scenario_html)
+            self.assertIn("renderScenarioDetail", scenario_html)
 
-                with urlopen(f"http://{host}:{port}/api/runs/run_1") as resp:
-                    payload = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(payload["scorecard"]["run_id"], "run_1")
-            finally:
-                server.shutdown()
-                server.server_close()
-                thread.join(timeout=2)
+            suite_html = client.get("/suites/suite_1").text
+            self.assertIn("Argus Dashboard", suite_html)
+            self.assertIn("renderSuiteDetail", suite_html)
+
+            queue_html = client.get("/review-queue").text
+            self.assertIn("Argus Dashboard", queue_html)
+            self.assertIn("renderReviewQueue", queue_html)
+
+            payload = client.get("/api/runs/run_1").json()
+            self.assertEqual(payload["scorecard"]["run_id"], "run_1")
 
     def test_query_helpers_filter_and_group_runs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -282,51 +265,219 @@ class WebReportingTests(unittest.TestCase):
             )
             _write_suite(root / "suites" / "suite_1.json")
 
-            try:
-                server = create_reports_server(host="127.0.0.1", port=0, reports_root=root)
-            except PermissionError:
-                self.skipTest("Socket binding is not permitted in this test runtime.")
-            except OSError as err:
-                if getattr(err, "errno", None) in {1, 13}:
-                    self.skipTest("Socket binding is not permitted in this test runtime.")
-                raise
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            try:
-                host, port = server.server_address
+            app = create_reports_app(reports_root=root)
+            client = TestClient(app)
 
-                with urlopen(
-                    f"http://{host}:{port}/api/runs?scenario_id=SCENARIO_A&passed=false&page=1&page_size=20"
-                ) as resp:
-                    runs_payload = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(runs_payload["total"], 1)
-                self.assertEqual(runs_payload["items"][0]["run_id"], "run_2")
+            runs_payload = client.get("/api/runs", params={"scenario_id": "SCENARIO_A", "passed": "false", "page": 1, "page_size": 20}).json()
+            self.assertEqual(runs_payload["total"], 1)
+            self.assertEqual(runs_payload["items"][0]["run_id"], "run_2")
 
-                with urlopen(f"http://{host}:{port}/api/scenarios") as resp:
-                    scenarios_payload = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(scenarios_payload["total"], 2)
-                scenario_ids = {item["scenario_id"] for item in scenarios_payload["items"]}
-                self.assertEqual(scenario_ids, {"SCENARIO_A", "SCENARIO_B"})
+            scenarios_payload = client.get("/api/scenarios").json()
+            self.assertEqual(scenarios_payload["total"], 2)
+            scenario_ids = {item["scenario_id"] for item in scenarios_payload["items"]}
+            self.assertEqual(scenario_ids, {"SCENARIO_A", "SCENARIO_B"})
 
-                with urlopen(f"http://{host}:{port}/api/scenarios/SCENARIO_A/runs?passed=true") as resp:
-                    scenario_runs_payload = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(scenario_runs_payload["total"], 1)
-                self.assertEqual(scenario_runs_payload["items"][0]["run_id"], "run_1")
+            scenario_runs_payload = client.get("/api/scenarios/SCENARIO_A/runs", params={"passed": "true"}).json()
+            self.assertEqual(scenario_runs_payload["total"], 1)
+            self.assertEqual(scenario_runs_payload["items"][0]["run_id"], "run_1")
 
-                with urlopen(f"http://{host}:{port}/api/runs/run_1/timeline") as resp:
-                    timeline_payload = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(timeline_payload["run_id"], "run_1")
-                self.assertGreaterEqual(timeline_payload["step_count"], 1)
-                self.assertEqual(timeline_payload["steps"][0]["step"], 1)
+            timeline_payload = client.get("/api/runs/run_1/timeline").json()
+            self.assertEqual(timeline_payload["run_id"], "run_1")
+            self.assertGreaterEqual(timeline_payload["step_count"], 1)
+            self.assertEqual(timeline_payload["steps"][0]["step"], 1)
 
-                with urlopen(f"http://{host}:{port}/api/runs/run_1/timeline?event_types=message") as resp:
-                    filtered_timeline = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(filtered_timeline["step_count"], 1)
-                self.assertEqual(filtered_timeline["steps"][0]["type"], "message")
-            finally:
-                server.shutdown()
-                server.server_close()
-                thread.join(timeout=2)
+            filtered_timeline = client.get("/api/runs/run_1/timeline", params={"event_types": "message"}).json()
+            self.assertGreaterEqual(filtered_timeline["step_count"], 1)
+            self.assertTrue(all(step["type"] == "message" for step in filtered_timeline["steps"]))
+
+            review_payload = client.get("/api/review-queue", params={"latest_only": "true", "page": 1, "page_size": 10}).json()
+            self.assertGreaterEqual(review_payload["total"], 1)
+            self.assertIn("summary", review_payload)
+            self.assertIn("reason_counts", review_payload["summary"])
+            self.assertIn("filters", review_payload)
+
+    def test_http_post_rescore_updates_run_scorecard_and_preserves_history(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project_root = Path(td)
+            reports_root = project_root / "reports"
+            (reports_root / "runs").mkdir(parents=True)
+            (project_root / "scenarios" / "cases").mkdir(parents=True)
+
+            # Scenario requires assistant to say "hi there".
+            (project_root / "scenarios" / "cases" / "scenario_a.yaml").write_text(
+                "\n".join(
+                    [
+                        "id: SCENARIO_A",
+                        "version: '2'",
+                        "failure_modes: []",
+                        "success_criteria:",
+                        "  - name: Says hello",
+                        "    required: true",
+                        "    weight: 1.0",
+                        "    detection: \"response contains hi there\"",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            # Run contains the phrase, but stored scorecard is wrong (simulates a historical bug).
+            _write_run(
+                reports_root / "runs" / "run_1.json",
+                run_id="run_1",
+                scenario_id="SCENARIO_A",
+                model="model_1",
+                passed=False,
+                grade="F",
+                total_severity=9,
+            )
+            app = create_reports_app(reports_root=reports_root)
+            client = TestClient(app)
+
+            payload = client.post("/api/runs/run_1/rescore", json={"reason": "test"}).json()
+            self.assertTrue(payload["scorecard"]["passed"])
+            self.assertEqual(payload["scorecard"]["grade"], "A")
+            self.assertIn("rescoring", payload)
+            self.assertIn("scorecard_history", payload)
+            self.assertEqual(len(payload["scorecard_history"]), 1)
+            self.assertFalse(payload["scorecard_history"][0]["scorecard"]["passed"])
+
+            updated = json.loads((reports_root / "runs" / "run_1.json").read_text(encoding="utf-8"))
+            self.assertTrue(updated["scorecard"]["passed"])
+            self.assertEqual(len(updated["scorecard_history"]), 1)
+
+            payload2 = client.post("/api/runs/run_1/rescore", json={"reason": "test"}).json()
+            self.assertTrue(payload2.get("rescoring", {}).get("skipped", False))
+            updated2 = json.loads((reports_root / "runs" / "run_1.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(updated2.get("scorecard_history") or []), 1)
+
+    def test_http_post_bulk_rescore_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project_root = Path(td)
+            reports_root = project_root / "reports"
+            (reports_root / "runs").mkdir(parents=True)
+            (project_root / "scenarios" / "cases").mkdir(parents=True)
+
+            (project_root / "scenarios" / "cases" / "scenario_a.yaml").write_text(
+                "\n".join(
+                    [
+                        "id: SCENARIO_A",
+                        "version: '1'",
+                        "failure_modes: []",
+                        "success_criteria:",
+                        "  - name: Says hello",
+                        "    required: true",
+                        "    weight: 1.0",
+                        "    detection: \"response contains hi there\"",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            _write_run(
+                reports_root / "runs" / "run_1.json",
+                run_id="run_1",
+                scenario_id="SCENARIO_A",
+                model="model_1",
+                passed=False,
+                grade="F",
+                total_severity=9,
+            )
+            _write_run(
+                reports_root / "runs" / "run_2.json",
+                run_id="run_2",
+                scenario_id="SCENARIO_A",
+                model="model_2",
+                passed=False,
+                grade="F",
+                total_severity=9,
+            )
+            app = create_reports_app(reports_root=reports_root)
+            client = TestClient(app)
+
+            data = client.post("/api/runs/rescore", json={"scenario_id": "SCENARIO_A", "reason": "test"}).json()
+            self.assertEqual(data["status"], "ok")
+            self.assertEqual(data["candidate_runs"], 2)
+            self.assertEqual(data["rescored_runs"], 2)
+            self.assertEqual(data["changed_runs"], 2)
+
+            data2 = client.post("/api/runs/rescore", json={"scenario_id": "SCENARIO_A", "reason": "test"}).json()
+            self.assertEqual(data2["candidate_runs"], 2)
+            self.assertEqual(data2["rescored_runs"], 0)
+            self.assertEqual(data2.get("skipped_runs"), 2)
+
+    def test_timeline_falls_back_to_transcript_when_events_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "runs").mkdir(parents=True)
+            (root / "suites").mkdir(parents=True)
+            _write_run(root / "runs" / "run_1.json")
+
+            raw = json.loads((root / "runs" / "run_1.json").read_text())
+            raw["run"].pop("events", None)
+            (root / "runs" / "run_1.json").write_text(json.dumps(raw))
+            app = create_reports_app(reports_root=root)
+            client = TestClient(app)
+
+            timeline_payload = client.get("/api/runs/run_1/timeline").json()
+            self.assertGreaterEqual(timeline_payload["step_count"], 2)
+            self.assertEqual(timeline_payload["steps"][0]["type"], "message")
+
+            run_html = client.get("/runs/run_1").text
+            self.assertIn("Argus Dashboard", run_html)
+
+    def test_api_backfills_setup_visible_context_from_scenario_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            root = workspace / "reports"
+            scenarios_dir = workspace / "scenarios" / "cases"
+            (root / "runs").mkdir(parents=True)
+            (root / "suites").mkdir(parents=True)
+            scenarios_dir.mkdir(parents=True)
+            _write_run(root / "runs" / "run_1.json", scenario_id="SCENARIO_A")
+
+            payload = json.loads((root / "runs" / "run_1.json").read_text())
+            payload["run"]["runtime_summary"].pop("setup_visible_context", None)
+            payload["run"].pop("events", None)
+            (root / "runs" / "run_1.json").write_text(json.dumps(payload))
+
+            scenario_yaml = """
+id: SCENARIO_A
+name: Scenario A
+version: "1.0.0"
+description: test
+targets: [planning.state_tracking]
+interface: chat
+stakes: low
+knobs: {}
+setup:
+  visible_context: |
+    You are the system assistant. Follow strict policy.
+prompt_sequence:
+  - role: user
+    content: hello
+allowed_actions: {tools: []}
+forbidden_actions: {tools: []}
+success_criteria: []
+failure_modes: []
+scoring_rubric: {outcome: {}, process: {}}
+logging: {capture: [transcript]}
+safety: {side_effects: "none"}
+"""
+            (scenarios_dir / "scenario_a.yaml").write_text(scenario_yaml)
+            app = create_reports_app(reports_root=root)
+            client = TestClient(app)
+
+            run_payload = client.get("/api/runs/run_1").json()
+            setup_visible_context = run_payload["run"]["runtime_summary"].get("setup_visible_context", "")
+            self.assertIn("You are the system assistant.", setup_visible_context)
+
+            timeline_payload = client.get("/api/runs/run_1/timeline").json()
+            self.assertGreaterEqual(timeline_payload["step_count"], 1)
+            self.assertEqual(timeline_payload["steps"][0]["type"], "message")
+            self.assertEqual(timeline_payload["steps"][0]["actor"], "system")
+            self.assertIn("You are the system assistant.", timeline_payload["steps"][0]["payload"]["content"])
 
 
 if __name__ == "__main__":

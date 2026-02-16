@@ -12,9 +12,9 @@ set -u
 #   ARGUS_MAX_TURNS=6
 #   ARGUS_SEED=42
 #   ARGUS_PROFILE=candidate
-#   ARGUS_MODEL_A=MiniMax-M2.1
+#   ARGUS_MODEL_A=MiniMax-M2.1   # or MiniMax-M2.5
 #   ARGUS_MODEL_B=stepfun/step-3.5-flash:free
-#   ARGUS_MATRIX_MODELS="MiniMax-M2.1,stepfun/step-3.5-flash:free,openrouter/aurora-alpha"
+#   ARGUS_MATRIX_MODELS="MiniMax-M2.5,MiniMax-M2.1,stepfun/step-3.5-flash:free,openrouter/aurora-alpha"
 #   ARGUS_PIPELINE_SCENARIO_LIST=scenarios/suites/sabotage_extended_v1.txt
 #   ARGUS_MATRIX_SCENARIO_LIST=scenarios/suites/complex_behavior_v1.txt
 #   ARGUS_TREND_WINDOW=12
