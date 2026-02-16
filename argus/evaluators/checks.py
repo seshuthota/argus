@@ -6,7 +6,10 @@ from types import SimpleNamespace
 from typing import Any, Callable
 import re
 
-from .macros import resolve_detection_macros
+from .macros import load_detection_macros, resolve_detection_macros
+
+
+DETECTION_MACROS = load_detection_macros()
 
 
 @dataclass
@@ -837,7 +840,7 @@ def _evaluate_detection_expression(detection: str, run_artifact: Any) -> ClauseE
             details="Empty detection expression",
         )
 
-    expr, unknown_macros = resolve_detection_macros(expr)
+    expr, unknown_macros = resolve_detection_macros(expr, macros=DETECTION_MACROS)
     if unknown_macros:
         macro_tokens = [f"${name}" for name in sorted(set(unknown_macros))]
         return ClauseEval(
