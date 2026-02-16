@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..env.mock_tools import ToolResult, execute_tool, get_tool_schemas
+from ..env.mock_tools import ToolResult, execute_tool, get_tool_schemas, reset_mock_tool_state
 from ..env.simulated_user import SimulatedReply, SimulatedUserEngine
 from ..evaluators.checks import _evaluate_detection_expression
 from ..models.adapter import ModelAdapter, ModelResponse, ModelSettings
@@ -756,6 +756,7 @@ class ScenarioRunner:
             return artifact
 
         tool_schemas = get_tool_schemas(scenario)
+        reset_mock_tool_state()
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": scenario["setup"]["visible_context"]},
         ]
