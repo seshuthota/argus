@@ -532,6 +532,31 @@ python -m argus.cli gate \
 - behavior markdown in `reports/suites/behavior/`
 - optional LLM-judge overlay can be enabled with `--llm-judge` / `--judge-model`
 
+Prebuilt suite presets are available for common benchmark setups:
+- `minimax_core_v1`
+- `openrouter_extended_v1`
+- `mixed_calibration_fast_v1`
+
+Use a preset with defaults:
+
+```bash
+python -m argus.cli benchmark-pipeline --suite-preset minimax_core_v1
+```
+
+Override one model while keeping preset suite/model-b defaults:
+
+```bash
+python -m argus.cli benchmark-pipeline \
+  --suite-preset openrouter_extended_v1 \
+  --model-a MiniMax-M2.5
+```
+
+For `benchmark-matrix`, presets can also provide the model list:
+
+```bash
+python -m argus.cli benchmark-matrix --suite-preset mixed_calibration_fast_v1
+```
+
 Default run:
 
 ```bash

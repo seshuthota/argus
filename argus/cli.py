@@ -59,6 +59,34 @@ from .scenario_mutation import available_profiles, generate_mutations_for_file
 console = Console()
 
 
+@dataclass(frozen=True)
+class BenchmarkSuitePreset:
+    """Prebuilt benchmark suite + model bundle."""
+
+    scenario_list: str
+    models: tuple[str, ...]
+    description: str
+
+
+BENCHMARK_SUITE_PRESETS: dict[str, BenchmarkSuitePreset] = {
+    "minimax_core_v1": BenchmarkSuitePreset(
+        scenario_list="scenarios/suites/sabotage_core_v1.txt",
+        models=("MiniMax-M2.1", "MiniMax-M2.5"),
+        description="Core sabotage coverage tuned for MiniMax baseline vs candidate runs.",
+    ),
+    "openrouter_extended_v1": BenchmarkSuitePreset(
+        scenario_list="scenarios/suites/sabotage_extended_v1.txt",
+        models=("stepfun/step-3.5-flash:free", "openrouter/aurora-alpha"),
+        description="Broader sabotage coverage using OpenRouter-hosted models.",
+    ),
+    "mixed_calibration_fast_v1": BenchmarkSuitePreset(
+        scenario_list="scenarios/suites/sabotage_calibration_focus_v1.txt",
+        models=("MiniMax-M2.1", "stepfun/step-3.5-flash:free", "openrouter/aurora-alpha"),
+        description="Fast calibration-focused benchmark sweep across mixed providers.",
+    ),
+}
+
+
 @click.group()
 def cli():
     """⚡ Argus — Scenario-Based Model Behavior Evaluation"""
@@ -230,6 +258,55 @@ def _resolve_scenario_paths(
             sys.exit(1)
         return sorted(loaded_paths)
     return sorted(Path(scenario_dir).glob(pattern))
+
+
+def _apply_pipeline_suite_preset(
+    *,
+    suite_preset: str | None,
+    scenario_list: str | None,
+    model_a: str,
+    model_b: str,
+    scenario_list_is_cmdline: bool,
+    model_a_is_cmdline: bool,
+    model_b_is_cmdline: bool,
+) -> tuple[str | None, str, str, BenchmarkSuitePreset | None]:
+    """Resolve benchmark-pipeline inputs using an optional suite preset."""
+    if not suite_preset:
+        return scenario_list, model_a, model_b, None
+
+    preset = BENCHMARK_SUITE_PRESETS[suite_preset]
+    if len(preset.models) < 2:
+        raise ValueError(f"Suite preset '{suite_preset}' must define at least two models.")
+    if scenario_list_is_cmdline:
+        raise ValueError("--suite-preset cannot be combined with explicit --scenario-list.")
+
+    resolved_scenario_list = preset.scenario_list
+    resolved_model_a = model_a if model_a_is_cmdline else preset.models[0]
+    resolved_model_b = model_b if model_b_is_cmdline else preset.models[1]
+    return resolved_scenario_list, resolved_model_a, resolved_model_b, preset
+
+
+def _apply_matrix_suite_preset(
+    *,
+    suite_preset: str | None,
+    scenario_list: str | None,
+    models: tuple[str, ...],
+    scenario_list_is_cmdline: bool,
+    models_is_cmdline: bool,
+) -> tuple[str | None, tuple[str, ...], BenchmarkSuitePreset | None]:
+    """Resolve benchmark-matrix inputs using an optional suite preset."""
+    if not suite_preset:
+        return scenario_list, models, None
+
+    preset = BENCHMARK_SUITE_PRESETS[suite_preset]
+    if len(preset.models) < 2:
+        raise ValueError(f"Suite preset '{suite_preset}' must define at least two models.")
+    if scenario_list_is_cmdline:
+        raise ValueError("--suite-preset cannot be combined with explicit --scenario-list.")
+
+    resolved_scenario_list = preset.scenario_list
+    resolved_models = models if models_is_cmdline else preset.models
+    return resolved_scenario_list, resolved_models, preset
 
 
 def _validate_scenarios(scenario_paths: list[Path]) -> list[tuple[Path, dict]]:
@@ -2393,6 +2470,12 @@ def serve_reports(reports_root: str, host: str, port: int):
     type=click.Path(exists=True, dir_okay=False),
     help="Optional newline-delimited list of scenario file paths.",
 )
+@click.option(
+    "--suite-preset",
+    type=click.Choice(sorted(BENCHMARK_SUITE_PRESETS.keys())),
+    default=None,
+    help="Prebuilt scenario+model bundle for common benchmark runs.",
+)
 @click.option("--model-a", default="MiniMax-M2.1", show_default=True)
 @click.option("--model-b", default="stepfun/step-3.5-flash:free", show_default=True)
 @click.option("--trials", "-n", default=3, type=int, help="Trials per scenario (default: 3)")
@@ -2475,6 +2558,7 @@ def benchmark_pipeline(
     scenario_dir: str,
     pattern: str,
     scenario_list: str | None,
+    suite_preset: str | None,
     model_a: str,
     model_b: str,
     trials: int,
@@ -2528,6 +2612,20 @@ def benchmark_pipeline(
         sys.exit(1)
     if mutation_max_variants < 1:
         console.print("[red]✗ --mutation-max-variants must be >= 1[/red]")
+        sys.exit(1)
+
+    try:
+        scenario_list, model_a, model_b, selected_preset = _apply_pipeline_suite_preset(
+            suite_preset=suite_preset,
+            scenario_list=scenario_list,
+            model_a=model_a,
+            model_b=model_b,
+            scenario_list_is_cmdline=ctx.get_parameter_source("scenario_list") == ParameterSource.COMMANDLINE,
+            model_a_is_cmdline=ctx.get_parameter_source("model_a") == ParameterSource.COMMANDLINE,
+            model_b_is_cmdline=ctx.get_parameter_source("model_b") == ParameterSource.COMMANDLINE,
+        )
+    except ValueError as err:
+        console.print(f"[red]✗ {err}[/red]")
         sys.exit(1)
 
     load_dotenv()
@@ -2588,6 +2686,8 @@ def benchmark_pipeline(
     console.print(f"  Trials/scenario: {trials}")
     console.print(f"  Requested runs/model: {len(scenario_paths) * trials}")
     console.print(f"  Models: A={model_a}, B={model_b}")
+    if selected_preset is not None:
+        console.print(f"  Suite preset: {suite_preset} ({selected_preset.description})")
     console.print(f"  Gate profile: {profile}")
 
     console.print(f"\n[bold]Model A:[/bold] {model_a}")
@@ -2711,9 +2811,15 @@ def benchmark_pipeline(
     help="Optional newline-delimited list of scenario file paths.",
 )
 @click.option(
+    "--suite-preset",
+    type=click.Choice(sorted(BENCHMARK_SUITE_PRESETS.keys())),
+    default=None,
+    help="Prebuilt scenario+model bundle for common benchmark runs.",
+)
+@click.option(
     "--models",
     multiple=True,
-    required=True,
+    required=False,
     help=(
         "Repeat --models for each model (minimum 2). "
         "Example: --models MiniMax-M2.1 --models stepfun/step-3.5-flash:free --models openrouter/aurora-alpha"
@@ -2794,6 +2900,7 @@ def benchmark_matrix(
     scenario_dir: str,
     pattern: str,
     scenario_list: str | None,
+    suite_preset: str | None,
     models: tuple[str, ...],
     trials: int,
     temperature: float,
@@ -2831,8 +2938,20 @@ def benchmark_matrix(
     """Run a model matrix on the same scenario/seed schedule and emit paired comparisons."""
     feedback_flags = load_misdetection_flags(misdetection_flags) if misdetection_flags else None
 
+    try:
+        scenario_list, models, selected_preset = _apply_matrix_suite_preset(
+            suite_preset=suite_preset,
+            scenario_list=scenario_list,
+            models=models,
+            scenario_list_is_cmdline=ctx.get_parameter_source("scenario_list") == ParameterSource.COMMANDLINE,
+            models_is_cmdline=ctx.get_parameter_source("models") == ParameterSource.COMMANDLINE,
+        )
+    except ValueError as err:
+        console.print(f"[red]✗ {err}[/red]")
+        sys.exit(1)
+
     if len(models) < 2:
-        console.print("[red]✗ Provide at least two --models values[/red]")
+        console.print("[red]✗ Provide at least two --models values (or use --suite-preset)[/red]")
         sys.exit(1)
     if trials < 1:
         console.print("[red]✗ --trials must be >= 1[/red]")
@@ -2908,6 +3027,8 @@ def benchmark_matrix(
     console.print(f"  Trials/scenario: {trials}")
     console.print(f"  Requested runs/model: {len(scenario_paths) * trials}")
     console.print(f"  Models: {', '.join(models)}")
+    if selected_preset is not None:
+        console.print(f"  Suite preset: {suite_preset} ({selected_preset.description})")
     console.print(f"  Gate profile: {profile}")
 
     matrix_runs: list[dict[str, Any]] = []
