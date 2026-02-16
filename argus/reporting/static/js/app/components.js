@@ -102,8 +102,8 @@ export function buildRunsTable(items, { escapeHtml }) {
         </thead>
         <tbody>
           ${items.map((row) => `
-            <tr onclick="app.navigate(event, '/runs/${row.run_id}')" style="cursor:pointer">
-              <td><a href="/runs/${row.run_id}" onclick="event.preventDefault()">${row.run_id}</a></td>
+            <tr data-nav-path="/runs/${row.run_id}" style="cursor:pointer">
+              <td><a href="/runs/${row.run_id}">${row.run_id}</a></td>
               <td>${escapeHtml(row.scenario_id)}</td>
               <td class="text-muted" style="font-family:var(--font-mono); font-size:0.85rem;">${escapeHtml(row.scenario_version || '')}</td>
               <td>${escapeHtml(row.model)}</td>
@@ -145,8 +145,8 @@ export function buildReviewQueueTable(items, { escapeHtml }) {
         </thead>
         <tbody>
           ${items.map((row) => `
-            <tr onclick="app.navigate(event, '/runs/${row.run_id}')" style="cursor:pointer">
-              <td><a href="/runs/${row.run_id}" onclick="event.preventDefault()">${row.run_id}</a></td>
+            <tr data-nav-path="/runs/${row.run_id}" style="cursor:pointer">
+              <td><a href="/runs/${row.run_id}">${row.run_id}</a></td>
               <td>${escapeHtml(row.scenario_id)}</td>
               <td>${escapeHtml(row.model)}</td>
               <td>
@@ -184,9 +184,9 @@ export function buildScenariosTable(items, { escapeHtml }) {
         </thead>
         <tbody>
           ${items.map((row) => `
-            <tr onclick="app.navigate(event, '/scenarios/${row.scenario_id}')" style="cursor:pointer">
+            <tr data-nav-path="/scenarios/${row.scenario_id}" style="cursor:pointer">
               <td>
-                <a href="/scenarios/${row.scenario_id}" onclick="event.preventDefault()">${escapeHtml(row.scenario_id)}</a>
+                <a href="/scenarios/${row.scenario_id}">${escapeHtml(row.scenario_id)}</a>
                 ${row.has_yaml ? '' : '<span class="badge warning" style="margin-left:8px;">missing yaml</span>'}
               </td>
               <td class="text-muted">${escapeHtml(row.name || '')}</td>
@@ -227,8 +227,8 @@ export function buildSuitesTable(items, { escapeHtml }) {
         </thead>
         <tbody>
           ${items.map((row) => `
-            <tr onclick="app.navigate(event, '/suites/${row.suite_id}')" style="cursor:pointer">
-              <td><a href="/suites/${row.suite_id}" onclick="event.preventDefault()">${row.suite_id}</a></td>
+            <tr data-nav-path="/suites/${row.suite_id}" style="cursor:pointer">
+              <td><a href="/suites/${row.suite_id}">${row.suite_id}</a></td>
               <td>${escapeHtml(row.model)}</td>
               <td>
                   <span class="badge ${row.pass_rate >= 0.8 ? 'success' : row.pass_rate >= 0.5 ? 'warning' : 'error'}">

@@ -527,6 +527,8 @@ def _is_supported_clause_shape(clause: str) -> bool:
         r"response\s+(?:not\s+contains|does\s+not\s+contain)\s+.+",
         r"email\s+address\s+used\s+not\s+from\s+[a-zA-Z0-9_]+\s+results",
         r"asks_confirmation_before_send",
+        r"asks_clarifying_question",
+        r"uncertainty_language",
         r"refusal_language",
         r"no_refusal_language",
         r"mentions_authorized_process",

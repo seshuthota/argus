@@ -33,7 +33,7 @@ export async function renderDashboard(app, root) {
     <div class="card">
       <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom:12px;">
         <h2 style="margin:0;">Review Queue</h2>
-        <a href="/review-queue" onclick="app.navigate(event, '/review-queue')">Open full queue &rarr;</a>
+        <a href="/review-queue" data-nav-path="/review-queue">Open full queue &rarr;</a>
       </div>
       <div class="text-muted" style="margin-bottom:12px;">
         Reasons: ${Object.entries(reasonCounts).map(([k, v]) => `${k}=${v}`).join(' • ') || 'none'}
@@ -66,8 +66,8 @@ export async function renderRunList(app, root) {
     <div class="page-header">
       <h1 class="page-title">Run Reports</h1>
       <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
-        <button onclick="app.rescoreRunsFromFilters(false)">Rescore Filtered</button>
-        <button class="primary" onclick="app.rescoreRunsFromFilters(true)">Rescore All</button>
+        <button data-action="rescore-filtered-runs">Rescore Filtered</button>
+        <button class="primary" data-action="rescore-all-runs">Rescore All</button>
       </div>
     </div>
 
@@ -106,7 +106,7 @@ export async function renderRunList(app, root) {
           </select>
         </div>
         <div class="filter-group" style="justify-content: flex-end;">
-            <button class="primary" onclick="app.applyRunFilters()">Apply Filters</button>
+            <button class="primary" data-action="apply-run-filters">Apply Filters</button>
         </div>
       </div>
     </div>
@@ -114,9 +114,9 @@ export async function renderRunList(app, root) {
     <div class="card">
       ${app.buildRunsTable(data.items)}
       <div class="pagination" style="margin-top: 16px; display: flex; gap: 8px;">
-        <button ${data.page <= 1 ? 'disabled' : ''} onclick="app.changePage(${data.page - 1})">Prev</button>
+        <button ${data.page <= 1 ? 'disabled' : ''} data-action="change-page" data-page="${data.page - 1}">Prev</button>
         <span style="align-self:center">Page ${data.page} of ${Math.ceil(data.total / data.page_size)} (${data.total} total)</span>
-        <button ${data.page * data.page_size >= data.total ? 'disabled' : ''} onclick="app.changePage(${data.page + 1})">Next</button>
+        <button ${data.page * data.page_size >= data.total ? 'disabled' : ''} data-action="change-page" data-page="${data.page + 1}">Next</button>
       </div>
     </div>
   `;
@@ -184,7 +184,7 @@ export async function renderReviewQueue(app, root) {
           </select>
         </div>
         <div class="filter-group" style="justify-content: flex-end;">
-            <button class="primary" onclick="app.applyReviewFilters()">Apply Filters</button>
+            <button class="primary" data-action="apply-review-filters">Apply Filters</button>
         </div>
       </div>
       <div class="text-muted">
@@ -195,9 +195,9 @@ export async function renderReviewQueue(app, root) {
     <div class="card">
       ${app.buildReviewQueueTable(data.items || [])}
       <div class="pagination" style="margin-top: 16px; display: flex; gap: 8px;">
-        <button ${data.page <= 1 ? 'disabled' : ''} onclick="app.changePage(${data.page - 1})">Prev</button>
+        <button ${data.page <= 1 ? 'disabled' : ''} data-action="change-page" data-page="${data.page - 1}">Prev</button>
         <span style="align-self:center">Page ${data.page} of ${Math.ceil(data.total / data.page_size)} (${data.total} total)</span>
-        <button ${data.page * data.page_size >= data.total ? 'disabled' : ''} onclick="app.changePage(${data.page + 1})">Next</button>
+        <button ${data.page * data.page_size >= data.total ? 'disabled' : ''} data-action="change-page" data-page="${data.page + 1}">Next</button>
       </div>
     </div>
   `;
@@ -228,9 +228,9 @@ export async function renderSuiteList(app, root) {
     <div class="card">
       ${app.buildSuitesTable(data.items)}
       <div class="pagination" style="margin-top: 16px; display: flex; gap: 8px;">
-        <button ${data.page <= 1 ? 'disabled' : ''} onclick="app.changePage(${data.page - 1})">Prev</button>
+        <button ${data.page <= 1 ? 'disabled' : ''} data-action="change-page" data-page="${data.page - 1}">Prev</button>
         <span style="align-self:center">Page ${data.page} of ${Math.ceil(data.total / data.page_size)}</span>
-        <button ${data.page * data.page_size >= data.total ? 'disabled' : ''} onclick="app.changePage(${data.page + 1})">Next</button>
+        <button ${data.page * data.page_size >= data.total ? 'disabled' : ''} data-action="change-page" data-page="${data.page + 1}">Next</button>
       </div>
     </div>
   `;

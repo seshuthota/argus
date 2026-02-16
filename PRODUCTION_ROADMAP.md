@@ -151,7 +151,7 @@
 | Task | Description | Priority |
 |------|-------------|----------|
 | **P4.1** Continuous monitoring | Scheduled eval runs + drift detection | Low |
-| **P4.2** Plugin architecture | Custom evaluators, adapters | Low |
+| **P4.2** Plugin architecture | Custom evaluators, adapters | 🔲 Foundation Added |
 | **P4.3** Collaborative review | Multi-user feedback workflow | Low |
 | **P4.4** Benchmark leaderboards | Public-facing results | Low |
 

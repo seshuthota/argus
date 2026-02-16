@@ -38,25 +38,49 @@ import {
         this.state.darkMode = localStorage.getItem('theme') === 'dark' ||
           (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
         this.applyTheme();
-        this.bindStaticUiEvents();
+        this.bindGlobalUiEvents();
 
         window.addEventListener('popstate', () => this.handleRoute());
         this.handleRoute(); // Initial load
       },
 
-      bindStaticUiEvents() {
-        document.querySelectorAll('[data-nav-path]').forEach((el) => {
-          el.addEventListener('click', (event) => {
-            const path = el.getAttribute('data-nav-path');
-            if (!path) return;
-            this.navigate(event, path);
-          });
-        });
+      bindGlobalUiEvents() {
+        document.addEventListener('click', (event) => {
+          const navEl = event.target.closest('[data-nav-path]');
+          if (navEl) {
+            const path = navEl.getAttribute('data-nav-path');
+            if (path) {
+              this.navigate(event, path);
+              return;
+            }
+          }
 
-        const themeToggle = document.querySelector('[data-action="toggle-theme"]');
-        if (themeToggle) {
-          themeToggle.addEventListener('click', () => this.toggleTheme());
-        }
+          const actionEl = event.target.closest('[data-action]');
+          if (!actionEl) return;
+          const action = actionEl.getAttribute('data-action') || '';
+          if (!action) return;
+          event.preventDefault();
+
+          if (action === 'toggle-theme') return this.toggleTheme();
+          if (action === 'apply-run-filters') return this.applyRunFilters();
+          if (action === 'rescore-filtered-runs') return this.rescoreRunsFromFilters(false);
+          if (action === 'rescore-all-runs') return this.rescoreRunsFromFilters(true);
+          if (action === 'apply-review-filters') return this.applyReviewFilters();
+          if (action === 'apply-compare') return this.applyCompare();
+          if (action === 'swap-compare') return this.swapCompare();
+          if (action === 'refresh-route') return this.handleRoute();
+          if (action === 'change-page') {
+            const page = Number(actionEl.getAttribute('data-page') || '1');
+            return this.changePage(page);
+          }
+          if (action === 'run-rescore') return this.rescoreRun(actionEl.getAttribute('data-run-id') || '');
+          if (action === 'run-judge-compare') return this.judgeCompareRun(actionEl.getAttribute('data-run-id') || '');
+          if (action === 'run-compare-from') return this.compareFromRun(actionEl.getAttribute('data-run-id') || '');
+          if (action === 'run-ack') return this.ackRun(actionEl.getAttribute('data-run-id') || '');
+          if (action === 'scenario-rescore') return this.rescoreScenario(actionEl.getAttribute('data-scenario-id') || '');
+          if (action === 'scenario-start-matrix') return this.startScenarioMatrixRun(actionEl.getAttribute('data-scenario-id') || '');
+          if (action === 'apply-scenario-run-filters') return this.applyScenarioRunFilters(actionEl.getAttribute('data-scenario-id') || '');
+        });
       },
 
       toggleTheme() {
@@ -251,17 +275,17 @@ import {
             <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
                  ${lastRescoredAt ? `<span class="badge neutral" style="font-size:0.9rem; padding:6px 12px;">Rescored ${this.escapeHtml(lastRescoredAt)}</span>` : ''}
                  ${judgeBadge}
-                 <button onclick="app.rescoreRun('${runId}')">Rescore</button>
-                 <button onclick="app.judgeCompareRun('${runId}')">AI Compare</button>
-                 <button onclick="app.compareFromRun('${runId}')">Compare…</button>
+                 <button data-action="run-rescore" data-run-id="${runId}">Rescore</button>
+                 <button data-action="run-judge-compare" data-run-id="${runId}">AI Compare</button>
+                 <button data-action="run-compare-from" data-run-id="${runId}">Compare…</button>
                  ${isAcknowledged
             ? '<span class="badge success" style="font-size:0.9rem; padding:6px 12px;">Reviewed ✅</span>'
-            : `<button id="btn-ack" onclick="app.ackRun('${runId}')">Mark as Reviewed</button>`
+            : `<button id="btn-ack" data-action="run-ack" data-run-id="${runId}">Mark as Reviewed</button>`
           }
             </div>
           </div>
           <div class="text-muted" style="margin-top:-6px; margin-bottom:12px;">
-            ${scenarioId ? `<a href="/scenarios/${this.escapeHtml(scenarioId)}" onclick="app.navigate(event, '/scenarios/${this.escapeHtml(scenarioId)}')">&larr; Back to ${this.escapeHtml(scenarioId)}</a>` : ''}
+            ${scenarioId ? `<a href="/scenarios/${this.escapeHtml(scenarioId)}" data-nav-path="/scenarios/${this.escapeHtml(scenarioId)}">&larr; Back to ${this.escapeHtml(scenarioId)}</a>` : ''}
           </div>
           <div class="grid-stats">
              <div class="stat-card">
@@ -315,10 +339,10 @@ import {
                 <input id="cmp-right" type="text" placeholder="e.g. a9f157e5" value="${this.escapeHtml(right)}">
               </div>
               <div class="filter-group">
-                <button class="primary" onclick="app.applyCompare()">Load</button>
+                <button class="primary" data-action="apply-compare">Load</button>
               </div>
               <div class="filter-group">
-                <button onclick="app.swapCompare()">Swap</button>
+                <button data-action="swap-compare">Swap</button>
               </div>
             </div>
             <div class="text-muted" style="margin-top:10px;">
@@ -423,9 +447,9 @@ import {
             <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
               <h2 style="margin:0;">Checks Diff</h2>
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <a href="/runs/${this.escapeHtml(left)}" onclick="app.navigate(event, '/runs/${this.escapeHtml(left)}')">Open left run</a>
+                <a href="/runs/${this.escapeHtml(left)}" data-nav-path="/runs/${this.escapeHtml(left)}">Open left run</a>
                 <span class="text-muted">•</span>
-                <a href="/runs/${this.escapeHtml(right)}" onclick="app.navigate(event, '/runs/${this.escapeHtml(right)}')">Open right run</a>
+                <a href="/runs/${this.escapeHtml(right)}" data-nav-path="/runs/${this.escapeHtml(right)}">Open right run</a>
               </div>
             </div>
             <div class="table-container" style="margin-top:12px;">
@@ -518,12 +542,12 @@ import {
                   ${meta.name ? `<div class="text-muted" style="font-size:0.95rem;">${this.escapeHtml(meta.name)}</div>` : ''}
                 </div>
                 <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
-                  <button onclick="app.rescoreScenario('${scenarioId}')">Rescore Scenario</button>
+                  <button data-action="scenario-rescore" data-scenario-id="${scenarioId}">Rescore Scenario</button>
                 </div>
             </div>
             <div class="card">
                 <div style="margin-bottom: 16px;">
-                  <a href="/scenarios" onclick="app.navigate(event, '/scenarios')">&larr; Back to Scenarios</a>
+                  <a href="/scenarios" data-nav-path="/scenarios">&larr; Back to Scenarios</a>
                 </div>
                 <div class="card" style="margin-bottom:16px;">
                   <div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap;">
@@ -620,7 +644,7 @@ import {
                       </label>
                     </div>
                     <div class="filter-group" style="justify-content:flex-end;">
-                      <button class="primary" onclick="app.startScenarioMatrixRun('${scenarioId}')">Run</button>
+                      <button class="primary" data-action="scenario-start-matrix" data-scenario-id="${scenarioId}">Run</button>
                     </div>
                   </div>
                   ${jobs.length ? `
@@ -638,7 +662,7 @@ import {
                           </thead>
                           <tbody>
                             ${jobs.map(j => `
-                              <tr onclick="app.navigate(event, '/jobs/${j.job_id}')" style="cursor:pointer">
+                              <tr data-nav-path="/jobs/${j.job_id}" style="cursor:pointer">
                                 <td style="font-family:var(--font-mono); font-size:0.85rem;">${this.escapeHtml(j.job_id)}</td>
                                 <td><span class="badge ${String(j.status||'').includes('error') ? 'error' : (j.status==='done' ? 'success' : 'warning')}">${this.escapeHtml(j.status||'')}</span></td>
                                 <td class="text-muted">${(j.completed_runs||0)}/${(j.total_runs||0)}</td>
@@ -681,7 +705,7 @@ import {
                     </select>
                   </div>
                   <div class="filter-group" style="justify-content:flex-end;">
-                    <button class="primary" onclick="app.applyScenarioRunFilters('${scenarioId}')">Apply</button>
+                    <button class="primary" data-action="apply-scenario-run-filters" data-scenario-id="${scenarioId}">Apply</button>
                   </div>
                 </div>
                 <h2>Runs</h2>
@@ -724,7 +748,7 @@ import {
                   <span class="badge neutral" style="padding:4px 10px;">${this.escapeHtml(String(grade))}</span>
                   ${dur ? `<span class="text-muted">${this.escapeHtml(dur)}</span>` : ''}
                 </div>
-                ${runId ? `<a href="/runs/${this.escapeHtml(runId)}" onclick="app.navigate(event, '/runs/${this.escapeHtml(runId)}')" style="font-family:var(--font-mono); font-size:0.9rem;">${this.escapeHtml(runId)}</a>` : ''}
+                ${runId ? `<a href="/runs/${this.escapeHtml(runId)}" data-nav-path="/runs/${this.escapeHtml(runId)}" style="font-family:var(--font-mono); font-size:0.9rem;">${this.escapeHtml(runId)}</a>` : ''}
               </div>
             `;
           }
@@ -743,7 +767,7 @@ import {
           </div>
           <div class="card">
             <div style="margin-bottom: 16px;">
-              <a href="/scenarios/${this.escapeHtml(data.scenario_id)}" onclick="app.navigate(event, '/scenarios/${this.escapeHtml(data.scenario_id)}')">&larr; Back to Scenario</a>
+              <a href="/scenarios/${this.escapeHtml(data.scenario_id)}" data-nav-path="/scenarios/${this.escapeHtml(data.scenario_id)}">&larr; Back to Scenario</a>
             </div>
             <div class="grid-stats" style="margin-bottom: 16px;">
               <div class="stat-card">
@@ -816,8 +840,8 @@ import {
                       <thead><tr><th>Run ID</th></tr></thead>
                       <tbody>
                         ${runs.map(rid => `
-                          <tr onclick="app.navigate(event, '/runs/${rid}')" style="cursor:pointer">
-                            <td style="font-family:var(--font-mono); font-size:0.9rem;"><a href="/runs/${rid}" onclick="event.preventDefault()">${rid}</a></td>
+                          <tr data-nav-path="/runs/${rid}" style="cursor:pointer">
+                            <td style="font-family:var(--font-mono); font-size:0.9rem;"><a href="/runs/${rid}">${rid}</a></td>
                           </tr>
                         `).join('')}
                       </tbody>
@@ -831,7 +855,7 @@ import {
               <pre class="tool-result">${this.escapeHtml(JSON.stringify(data.errors, null, 2))}</pre>
             ` : ''}
             <div style="margin-top:12px;">
-              <button onclick="app.handleRoute()">Refresh</button>
+              <button data-action="refresh-route">Refresh</button>
             </div>
           </div>
         `;
@@ -868,7 +892,7 @@ import {
             </div>
             <div class="card">
                 <div style="margin-bottom: 16px;">
-                  <a href="/suites" onclick="app.navigate(event, '/suites')">&larr; Back to Suites</a>
+                  <a href="/suites" data-nav-path="/suites">&larr; Back to Suites</a>
                 </div>
                 <div class="grid-stats" style="margin-bottom: 16px;">
                   <div class="stat-card">

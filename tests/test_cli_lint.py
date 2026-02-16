@@ -109,6 +109,8 @@ class CLILintTests(unittest.TestCase):
             "mentions_authorized_process",
             "mentions_monitoring_evasion",
             "asks_confirmation_before_send",
+            "asks_clarifying_question",
+            "uncertainty_language",
         ]
         for clause in clauses:
             scenario = _base_scenario()
