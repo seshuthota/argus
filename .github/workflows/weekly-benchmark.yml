@@ -82,6 +82,17 @@ jobs:
             --window 12 \
             --output reports/suites/trends/weekly_trend_report.md
 
+      - name: Generate drift summary
+        run: |
+          python -m argus.cli trend-drift-check \
+            --trend-dir reports/suites/trends \
+            --window 12 \
+            --max-pass-drop 0.08 \
+            --max-severity-increase 0.75 \
+            --max-anomaly-increase 3 \
+            --output reports/suites/trends/weekly_drift_report.md \
+            --output-json reports/suites/trends/weekly_drift_report.json
+
       - name: Run benchmark matrix
         run: |
           TRIALS="${{ github.event.inputs.trials || '1' }}"
@@ -132,6 +143,7 @@ jobs:
             reports/suites/matrix/**/*.json
             reports/suites/matrix/**/*.md
             reports/suites/trends/*.jsonl
+            reports/suites/trends/*.json
             reports/suites/trends/*.md
             reports/suites/behavior/*.md
             reports/visuals/**/*.svg

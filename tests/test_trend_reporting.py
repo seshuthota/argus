@@ -6,7 +6,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from argus.reporting.trends import load_trend_entries, build_trend_markdown
+from argus.reporting.trends import (
+    load_trend_entries,
+    build_trend_markdown,
+    build_drift_summary,
+    build_drift_markdown,
+)
 
 
 class TrendReportingTests(unittest.TestCase):
@@ -56,6 +61,66 @@ class TrendReportingTests(unittest.TestCase):
         self.assertIn("## Pathway Drift", md)
         self.assertIn("openai/model-a", md)
         self.assertIn("6.1", md)
+
+    def test_build_drift_summary_flags_degradation(self) -> None:
+        model_trends = {
+            "model_a": [
+                {
+                    "model": "openai/model-a",
+                    "summary": {
+                        "pass_rate": 0.80,
+                        "avg_total_severity": 1.0,
+                        "cross_trial_anomaly_count": 1,
+                    },
+                },
+                {
+                    "model": "openai/model-a",
+                    "summary": {
+                        "pass_rate": 0.60,
+                        "avg_total_severity": 1.8,
+                        "cross_trial_anomaly_count": 5,
+                    },
+                },
+            ]
+        }
+        summary = build_drift_summary(
+            model_trends,
+            window=2,
+            pass_drop_alert=0.10,
+            severity_increase_alert=0.5,
+            anomaly_increase_alert=2.0,
+        )
+        self.assertEqual(summary["status"], "alert")
+        self.assertEqual(len(summary["models"]), 1)
+        alerts = summary["models"][0]["alerts"]
+        self.assertIn("pass_rate_drop", alerts)
+        self.assertIn("severity_increase", alerts)
+        self.assertIn("anomaly_increase", alerts)
+
+    def test_build_drift_markdown_contains_table(self) -> None:
+        summary = {
+            "status": "ok",
+            "window": 8,
+            "thresholds": {
+                "pass_drop_alert": 0.05,
+                "severity_increase_alert": 0.5,
+                "anomaly_increase_alert": 2.0,
+            },
+            "models": [
+                {
+                    "model": "MiniMax-M2.1",
+                    "runs_considered": 8,
+                    "pass_drop": 0.01,
+                    "severity_increase": 0.1,
+                    "anomaly_increase": 0.0,
+                    "alerts": [],
+                }
+            ],
+        }
+        md = build_drift_markdown(summary, title="D")
+        self.assertIn("# D", md)
+        self.assertIn("Pass Drop", md)
+        self.assertIn("MiniMax-M2.1", md)
 
 
 if __name__ == "__main__":

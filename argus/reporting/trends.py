@@ -127,3 +127,112 @@ def build_trend_markdown(
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def build_drift_summary(
+    model_trends: dict[str, list[dict[str, Any]]],
+    *,
+    window: int = 8,
+    pass_drop_alert: float = 0.05,
+    severity_increase_alert: float = 0.5,
+    anomaly_increase_alert: float = 2.0,
+) -> dict[str, Any]:
+    """Compute compact drift deltas and alert flags per model."""
+    models: list[dict[str, Any]] = []
+    for key, entries in sorted(model_trends.items(), key=lambda kv: kv[0]):
+        if not entries:
+            continue
+        recent = entries[-window:] if window > 0 else entries
+        first = recent[0]
+        last = recent[-1]
+        first_pass = _metric(first, "pass_rate")
+        last_pass = _metric(last, "pass_rate")
+        first_severity = _metric(first, "avg_total_severity")
+        last_severity = _metric(last, "avg_total_severity")
+        first_anomalies = _metric(first, "cross_trial_anomaly_count")
+        last_anomalies = _metric(last, "cross_trial_anomaly_count")
+
+        pass_drop = max(0.0, first_pass - last_pass)
+        severity_increase = max(0.0, last_severity - first_severity)
+        anomaly_increase = max(0.0, last_anomalies - first_anomalies)
+
+        alerts: list[str] = []
+        if pass_drop > pass_drop_alert:
+            alerts.append("pass_rate_drop")
+        if severity_increase > severity_increase_alert:
+            alerts.append("severity_increase")
+        if anomaly_increase > anomaly_increase_alert:
+            alerts.append("anomaly_increase")
+
+        models.append(
+            {
+                "model": _model_name(recent, key),
+                "runs_considered": len(recent),
+                "first_pass_rate": first_pass,
+                "latest_pass_rate": last_pass,
+                "pass_drop": pass_drop,
+                "first_avg_total_severity": first_severity,
+                "latest_avg_total_severity": last_severity,
+                "severity_increase": severity_increase,
+                "first_cross_trial_anomaly_count": first_anomalies,
+                "latest_cross_trial_anomaly_count": last_anomalies,
+                "anomaly_increase": anomaly_increase,
+                "alerts": alerts,
+            }
+        )
+
+    status = "ok"
+    if any(model.get("alerts") for model in models):
+        status = "alert"
+
+    return {
+        "status": status,
+        "window": window,
+        "thresholds": {
+            "pass_drop_alert": pass_drop_alert,
+            "severity_increase_alert": severity_increase_alert,
+            "anomaly_increase_alert": anomaly_increase_alert,
+        },
+        "models": models,
+    }
+
+
+def build_drift_markdown(summary: dict[str, Any], *, title: str = "Argus Drift Summary") -> str:
+    """Render markdown from a drift summary payload."""
+    lines: list[str] = []
+    lines.append(f"# {title}")
+    lines.append("")
+    lines.append(f"- Status: `{summary.get('status', 'unknown')}`")
+    lines.append(f"- Window: `{summary.get('window', 0)}`")
+    lines.append("")
+
+    thresholds = summary.get("thresholds", {}) or {}
+    lines.append("Thresholds:")
+    lines.append(
+        f"- pass_drop_alert: `{float(thresholds.get('pass_drop_alert', 0.0)):.3f}`"
+    )
+    lines.append(
+        f"- severity_increase_alert: `{float(thresholds.get('severity_increase_alert', 0.0)):.3f}`"
+    )
+    lines.append(
+        f"- anomaly_increase_alert: `{float(thresholds.get('anomaly_increase_alert', 0.0)):.3f}`"
+    )
+    lines.append("")
+
+    models = summary.get("models", []) or []
+    if not models:
+        lines.append("No model trend entries found.")
+        return "\n".join(lines).rstrip() + "\n"
+
+    lines.append("| Model | Runs | Pass Drop | Severity Increase | Anomaly Increase | Alerts |")
+    lines.append("|---|---:|---:|---:|---:|---|")
+    for model in models:
+        alerts = ", ".join(model.get("alerts", [])) or "none"
+        lines.append(
+            f"| `{model.get('model', 'unknown')}` | {int(model.get('runs_considered', 0))} | "
+            f"{float(model.get('pass_drop', 0.0)) * 100:.1f}% | "
+            f"{float(model.get('severity_increase', 0.0)):.3f} | "
+            f"{float(model.get('anomaly_increase', 0.0)):.1f} | {alerts} |"
+        )
+    lines.append("")
+    return "\n".join(lines).rstrip() + "\n"

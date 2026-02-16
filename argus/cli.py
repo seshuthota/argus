@@ -44,7 +44,12 @@ from .reporting.gates import evaluate_suite_quality_gates
 from .reporting.feedback import load_misdetection_flags, apply_misdetection_flags
 from .reporting.gate_profiles import GATE_PROFILES
 from .reporting.comparison import build_suite_comparison_markdown
-from .reporting.trends import load_trend_entries, build_trend_markdown
+from .reporting.trends import (
+    load_trend_entries,
+    build_trend_markdown,
+    build_drift_summary,
+    build_drift_markdown,
+)
 from .reporting.paired import build_paired_analysis, build_paired_markdown
 from .reporting.behavior import build_behavior_report_markdown
 from .reporting.visualize import (
@@ -2346,6 +2351,113 @@ def trend_report(
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(markdown)
     console.print(f"[green]✓[/green] Trend report saved: {out}")
+
+
+@cli.command("trend-drift-check")
+@click.option(
+    "--trend-dir",
+    default="reports/suites/trends",
+    type=click.Path(exists=True, file_okay=False),
+    show_default=True,
+    help="Directory with per-model trend JSONL files.",
+)
+@click.option(
+    "--trend-file",
+    "trend_files",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Optional explicit trend JSONL file(s). If omitted, all *.jsonl in --trend-dir are used.",
+)
+@click.option("--window", default=8, type=int, show_default=True, help="Number of most recent entries per model.")
+@click.option("--max-pass-drop", default=0.05, type=float, show_default=True, help="Alert threshold for pass-rate drop.")
+@click.option(
+    "--max-severity-increase",
+    default=0.5,
+    type=float,
+    show_default=True,
+    help="Alert threshold for avg-total-severity increase.",
+)
+@click.option(
+    "--max-anomaly-increase",
+    default=2.0,
+    type=float,
+    show_default=True,
+    help="Alert threshold for cross-trial anomaly count increase.",
+)
+@click.option(
+    "--output",
+    default="reports/suites/trends/weekly_drift_report.md",
+    show_default=True,
+    help="Output markdown path.",
+)
+@click.option(
+    "--output-json",
+    default="reports/suites/trends/weekly_drift_report.json",
+    show_default=True,
+    help="Output JSON summary path.",
+)
+@click.option("--strict/--no-strict", default=False, show_default=True, help="Exit non-zero when drift alerts are present.")
+def trend_drift_check(
+    trend_dir: str,
+    trend_files: tuple[str, ...],
+    window: int,
+    max_pass_drop: float,
+    max_severity_increase: float,
+    max_anomaly_increase: float,
+    output: str,
+    output_json: str,
+    strict: bool,
+):
+    """Generate drift summary artifacts and optionally fail on threshold breaches."""
+    if window < 2:
+        console.print("[red]✗ --window must be >= 2[/red]")
+        sys.exit(1)
+    if max_pass_drop < 0 or max_severity_increase < 0 or max_anomaly_increase < 0:
+        console.print("[red]✗ Drift thresholds must be >= 0[/red]")
+        sys.exit(1)
+
+    files: list[Path]
+    if trend_files:
+        files = [Path(p) for p in trend_files]
+    else:
+        files = sorted(Path(trend_dir).glob("*.jsonl"))
+
+    if not files:
+        console.print("[red]✗ No trend files found.[/red]")
+        sys.exit(1)
+
+    model_trends: dict[str, list[dict[str, Any]]] = {}
+    for f in files:
+        model_trends[f.stem] = load_trend_entries(f)
+
+    summary = build_drift_summary(
+        model_trends,
+        window=window,
+        pass_drop_alert=max_pass_drop,
+        severity_increase_alert=max_severity_increase,
+        anomaly_increase_alert=max_anomaly_increase,
+    )
+    markdown = build_drift_markdown(summary, title="Argus Weekly Drift Report")
+
+    out_md = Path(output)
+    out_md.parent.mkdir(parents=True, exist_ok=True)
+    out_md.write_text(markdown)
+
+    out_json = Path(output_json)
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(json.dumps(summary, indent=2))
+
+    console.print(f"[green]✓[/green] Drift markdown saved: {out_md}")
+    console.print(f"[green]✓[/green] Drift summary saved: {out_json}")
+
+    if summary.get("status") == "alert":
+        console.print("[yellow]![/yellow] Drift alerts detected in one or more model timelines.")
+        for model in summary.get("models", []):
+            alerts = model.get("alerts", []) or []
+            if alerts:
+                console.print(f"  - {model.get('model', 'unknown')}: {', '.join(alerts)}")
+        if strict:
+            sys.exit(2)
 
 
 @cli.command("visualize-suite")
