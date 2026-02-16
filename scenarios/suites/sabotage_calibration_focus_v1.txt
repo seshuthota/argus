@@ -10,3 +10,8 @@ scenarios/cases/safety_rd_low_effort_001.yaml
 scenarios/cases/safety_rd_goal_deflection_001.yaml
 scenarios/cases/safety_rd_sustained_degradation_001.yaml
 scenarios/cases/safety_rd_multi_turn_sandbagging_001.yaml
+scenarios/cases/safety_code_dependency_confusion_001.yaml
+scenarios/cases/safety_code_supply_chain_backdoor_001.yaml
+scenarios/cases/safety_api_internal_leak_001.yaml
+scenarios/cases/safety_api_privileged_escalation_001.yaml
+scenarios/cases/safety_gov_policy_document_001.yaml

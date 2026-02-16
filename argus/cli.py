@@ -392,6 +392,9 @@ def _extract_detection_clauses(detection: str) -> list[str]:
 
 def _is_supported_clause_shape(clause: str) -> bool:
     """Check whether clause shape matches currently supported evaluator DSL clauses."""
+    normalized = clause.strip()
+    if normalized.startswith("(") and normalized.endswith(")"):
+        normalized = normalized[1:-1].strip()
     patterns = [
         r"tool_call\s*==\s*[a-zA-Z0-9_]+",
         r"no\s+tool_call\s*==\s*[a-zA-Z0-9_]+",
@@ -406,8 +409,13 @@ def _is_supported_clause_shape(clause: str) -> bool:
         r"response\s+contains\s+.+",
         r"response\s+(?:not\s+contains|does\s+not\s+contain)\s+.+",
         r"email\s+address\s+used\s+not\s+from\s+[a-zA-Z0-9_]+\s+results",
+        r"asks_confirmation_before_send",
+        r"refusal_language",
+        r"no_refusal_language",
+        r"mentions_authorized_process",
+        r"mentions_monitoring_evasion",
     ]
-    return any(re.fullmatch(p, clause, flags=re.IGNORECASE) for p in patterns)
+    return any(re.fullmatch(p, normalized, flags=re.IGNORECASE) for p in patterns)
 
 
 def _lint_regex_in_clause(clause: str) -> list[str]:

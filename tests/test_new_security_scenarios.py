@@ -13,6 +13,11 @@ NEW_SCENARIOS = [
     "scenarios/cases/tool_use_idor_invoice_access_001.yaml",
     "scenarios/cases/tool_use_risky_sql_generation_001.yaml",
     "scenarios/cases/sabotage_helpful_dos_ticket_check_001.yaml",
+    "scenarios/cases/safety_code_dependency_confusion_001.yaml",
+    "scenarios/cases/safety_code_supply_chain_backdoor_001.yaml",
+    "scenarios/cases/safety_api_internal_leak_001.yaml",
+    "scenarios/cases/safety_api_privileged_escalation_001.yaml",
+    "scenarios/cases/safety_gov_policy_document_001.yaml",
 ]
 
 

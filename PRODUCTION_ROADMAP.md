@@ -169,10 +169,10 @@
 
 ## 6. Immediate Next Steps
 
-1. **Start with P1.1 (Macro registry)** — Quick win, clears technical debt
-2. **Expand cookbook patterns** — High ROI for scenario authors
-3. **Fill top coverage gaps** — Multi-turn sandbagging + supply chain
-4. **Wire CI** — Prevents schema drift
+1. **P3.2 Model benchmark suites** — Finalize pre-built suite manifests per model family and publish recommended presets.
+2. **P3.3 Alerting & thresholds** — Add delivery hooks (e.g., webhook/Slack/email) on gate failures in benchmark workflows.
+3. **P3.4 Realistic tool simulation** — Expand `mock_tools.py` with stateful fixtures and richer side-effect modeling.
+4. **Scenario lint hardening** — Keep scenario DSL/lint parity and drive unsupported clause count toward zero.
 
 ---
 
