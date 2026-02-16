@@ -158,23 +158,32 @@ class WebReportingTests(unittest.TestCase):
 
             home = client.get("/").text
             self.assertIn("Argus Dashboard", home)
-            self.assertIn("const API_BASE = '/api';", home)
+            self.assertIn('/static/css/dashboard.css', home)
+            self.assertIn('/static/js/dashboard-app.js', home)
 
             run_html = client.get("/runs/run_1").text
             self.assertIn("Argus Dashboard", run_html)
-            self.assertIn("renderRunDetail", run_html)
+            self.assertIn('/static/js/dashboard-app.js', run_html)
 
             scenario_html = client.get("/scenarios/SCENARIO_A").text
             self.assertIn("Argus Dashboard", scenario_html)
-            self.assertIn("renderScenarioDetail", scenario_html)
+            self.assertIn('/static/js/dashboard-app.js', scenario_html)
 
             suite_html = client.get("/suites/suite_1").text
             self.assertIn("Argus Dashboard", suite_html)
-            self.assertIn("renderSuiteDetail", suite_html)
+            self.assertIn('/static/js/dashboard-app.js', suite_html)
 
             queue_html = client.get("/review-queue").text
             self.assertIn("Argus Dashboard", queue_html)
-            self.assertIn("renderReviewQueue", queue_html)
+            self.assertIn('/static/js/dashboard-app.js', queue_html)
+
+            css_payload = client.get("/static/css/dashboard.css")
+            self.assertEqual(css_payload.status_code, 200)
+            self.assertIn(":root", css_payload.text)
+
+            js_payload = client.get("/static/js/dashboard-app.js")
+            self.assertEqual(js_payload.status_code, 200)
+            self.assertIn("window.app = app;", js_payload.text)
 
             payload = client.get("/api/runs/run_1").json()
             self.assertEqual(payload["scorecard"]["run_id"], "run_1")
