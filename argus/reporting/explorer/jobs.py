@@ -346,7 +346,11 @@ def _run_matrix_job(reports_root: Path, job_id: str) -> None:
                     _mark_finished(item=item, error=str(artifact.error))
                     return
 
-                check_results = run_all_checks(artifact, scenario)
+                check_results = run_all_checks(
+                    artifact,
+                    scenario,
+                    confidence_reports_root=root,
+                )
                 llm_meta = None
                 if ai_compare and ai_compare_ready:
                     judge_provider = provider_key_for_matrix_model(judge_model)

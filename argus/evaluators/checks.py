@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
 import re
 
+from .confidence import (
+    annotate_pattern_observations,
+    calculate_confidence_from_historical_performance,
+    compute_regex_pattern_complexity,
+    get_pattern_history_entry,
+    load_detection_confidence_history,
+    record_detection_pattern_observations,
+)
 from .macros import load_detection_macros, resolve_detection_macros
 
 
@@ -25,6 +34,7 @@ class CheckResult:
     evidence: list[str] | None = None  # supporting data
     confidence: float = 1.0
     unsupported_clauses: list[str] | None = None
+    pattern_observations: list[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -36,6 +46,7 @@ class ClauseEval:
     evidence: list[str] | None = None
     confidence: float = 1.0
     unsupported_clauses: list[str] | None = None
+    pattern_observations: list[dict[str, Any]] | None = None
 
 
 def _severity_from_failure_modes(
@@ -81,28 +92,43 @@ def _semantic_similarity_score(text_a: str, text_b: str) -> float:
     return len(intersection) / len(union)
 
 
-def _regex_confidence(pattern: str) -> float:
-    """Estimate confidence for regex-based detections (lower for overly broad patterns)."""
-    p = pattern.strip()
-    confidence = 1.0
-
-    if p in (".*", ".+"):
-        return 0.2
-
-    if len(p) < 5:
-        confidence = min(confidence, 0.6)
-
-    if ".*" in p or ".+" in p:
-        confidence = min(confidence, 0.65)
-
-    alternations = p.count("|")
-    if alternations >= 8:
-        confidence = min(confidence, 0.7)
-
-    if p.lower() in (r"\w+", r"[a-z]+", r"[a-z0-9]+"):
-        confidence = min(confidence, 0.45)
-
-    return confidence
+def _regex_observation(
+    pattern: str,
+    *,
+    clause_type: str,
+    matched: bool,
+    applicable: bool,
+    confidence_history: dict[str, Any] | None,
+    unsupported_clause_count: int = 0,
+) -> tuple[float, dict[str, Any]]:
+    """Build a regex pattern observation + confidence for one clause evaluation."""
+    history_entry = get_pattern_history_entry(
+        confidence_history,
+        clause_type=clause_type,
+        pattern=pattern,
+    )
+    confidence = calculate_confidence_from_historical_performance(
+        pattern,
+        clause_type=clause_type,
+        history_entry=history_entry,
+        unsupported_clause_count=unsupported_clause_count,
+    )
+    observation: dict[str, Any] = {
+        "pattern": pattern,
+        "clause_type": clause_type,
+        "matched": matched,
+        "applicable": applicable,
+        "confidence": confidence,
+        "complexity": compute_regex_pattern_complexity(pattern),
+    }
+    if isinstance(history_entry, dict):
+        observation["history"] = {
+            "total_evaluations": int(history_entry.get("total_evaluations", 0) or 0),
+            "match_count": int(history_entry.get("match_count", 0) or 0),
+            "accuracy": float(history_entry.get("accuracy", 0.0) or 0.0),
+            "false_positive_rate": float(history_entry.get("false_positive_rate", 0.0) or 0.0),
+        }
+    return confidence, observation
 
 
 def _extract_used_emails(run_artifact: Any) -> set[str]:
@@ -304,7 +330,12 @@ def _handle_response_word_count(match: re.Match[str], _: str, run_artifact: Any)
     )
 
 
-def _handle_response_sequence_regex(match: re.Match[str], clause_raw: str, run_artifact: Any) -> ClauseEval:
+def _handle_response_sequence_regex(
+    match: re.Match[str],
+    clause_raw: str,
+    run_artifact: Any,
+    confidence_history: dict[str, Any] | None = None,
+) -> ClauseEval:
     first_pattern = match.group(1).strip().strip("\"'")
     second_pattern = match.group(2).strip().strip("\"'")
     assistant_text = _assistant_text(run_artifact)
@@ -329,17 +360,57 @@ def _handle_response_sequence_regex(match: re.Match[str], clause_raw: str, run_a
             evidence=[str(err)],
             confidence=0.0,
             unsupported_clauses=[clause_raw],
+            pattern_observations=[
+                {
+                    "pattern": first_pattern,
+                    "clause_type": "response_sequence_regex:first",
+                    "matched": False,
+                    "applicable": False,
+                    "confidence": 0.0,
+                    "complexity": compute_regex_pattern_complexity(first_pattern),
+                    "invalid_regex": True,
+                },
+                {
+                    "pattern": second_pattern,
+                    "clause_type": "response_sequence_regex:second",
+                    "matched": False,
+                    "applicable": False,
+                    "confidence": 0.0,
+                    "complexity": compute_regex_pattern_complexity(second_pattern),
+                    "invalid_regex": True,
+                },
+            ],
         )
+    first_conf, first_obs = _regex_observation(
+        first_pattern,
+        clause_type="response_sequence_regex:first",
+        matched=first_match is not None,
+        applicable=True,
+        confidence_history=confidence_history,
+    )
+    second_conf, second_obs = _regex_observation(
+        second_pattern,
+        clause_type="response_sequence_regex:second",
+        matched=second_match is not None,
+        applicable=True,
+        confidence_history=confidence_history,
+    )
     return ClauseEval(
         matched=matched,
         applicable=True,
         details=f"response sequence regex {first_pattern} then regex {second_pattern}",
         evidence=[f"matched={matched}"],
-        confidence=min(_regex_confidence(first_pattern), _regex_confidence(second_pattern)),
+        confidence=min(first_conf, second_conf),
+        pattern_observations=[first_obs, second_obs],
     )
 
 
-def _handle_response_matches_regex(match: re.Match[str], clause_raw: str, run_artifact: Any) -> ClauseEval:
+def _handle_response_matches_regex(
+    match: re.Match[str],
+    clause_raw: str,
+    run_artifact: Any,
+    confidence_history: dict[str, Any] | None = None,
+) -> ClauseEval:
     pattern = match.group(1).strip().strip("\"'")
     assistant_text = _assistant_text(run_artifact)
     try:
@@ -352,17 +423,41 @@ def _handle_response_matches_regex(match: re.Match[str], clause_raw: str, run_ar
             evidence=[str(err)],
             confidence=0.0,
             unsupported_clauses=[clause_raw],
+            pattern_observations=[
+                {
+                    "pattern": pattern,
+                    "clause_type": "response_matches_regex",
+                    "matched": False,
+                    "applicable": False,
+                    "confidence": 0.0,
+                    "complexity": compute_regex_pattern_complexity(pattern),
+                    "invalid_regex": True,
+                }
+            ],
         )
+    confidence, observation = _regex_observation(
+        pattern,
+        clause_type="response_matches_regex",
+        matched=matched,
+        applicable=True,
+        confidence_history=confidence_history,
+    )
     return ClauseEval(
         matched=matched,
         applicable=True,
         details=f"response matches regex {pattern}",
         evidence=[f"matched={matched}"],
-        confidence=_regex_confidence(pattern),
+        confidence=confidence,
+        pattern_observations=[observation],
     )
 
 
-def _handle_response_not_matches_regex(match: re.Match[str], clause_raw: str, run_artifact: Any) -> ClauseEval:
+def _handle_response_not_matches_regex(
+    match: re.Match[str],
+    clause_raw: str,
+    run_artifact: Any,
+    confidence_history: dict[str, Any] | None = None,
+) -> ClauseEval:
     pattern = match.group(1).strip().strip("\"'")
     assistant_text = _assistant_text(run_artifact)
     try:
@@ -375,13 +470,32 @@ def _handle_response_not_matches_regex(match: re.Match[str], clause_raw: str, ru
             evidence=[str(err)],
             confidence=0.0,
             unsupported_clauses=[clause_raw],
+            pattern_observations=[
+                {
+                    "pattern": pattern,
+                    "clause_type": "response_not_matches_regex",
+                    "matched": False,
+                    "applicable": False,
+                    "confidence": 0.0,
+                    "complexity": compute_regex_pattern_complexity(pattern),
+                    "invalid_regex": True,
+                }
+            ],
         )
+    confidence, observation = _regex_observation(
+        pattern,
+        clause_type="response_not_matches_regex",
+        matched=matched,
+        applicable=True,
+        confidence_history=confidence_history,
+    )
     return ClauseEval(
         matched=matched,
         applicable=True,
         details=f"response not matches regex {pattern}",
         evidence=[f"matched={matched}"],
-        confidence=_regex_confidence(pattern),
+        confidence=confidence,
+        pattern_observations=[observation],
     )
 
 
@@ -811,12 +925,38 @@ _CLAUSE_DISPATCH: list[tuple[re.Pattern[str], ClauseHandler]] = [
 ]
 
 
-def _evaluate_clause(clause: str, run_artifact: Any) -> ClauseEval:
+def _evaluate_clause(
+    clause: str,
+    run_artifact: Any,
+    *,
+    confidence_history: dict[str, Any] | None = None,
+) -> ClauseEval:
     """Evaluate one detection DSL clause using a pattern-handler dispatch table."""
     clause_raw = clause.strip()
     for pattern, handler in _CLAUSE_DISPATCH:
         match = pattern.fullmatch(clause_raw)
         if match is not None:
+            if handler is _handle_response_sequence_regex:
+                return _handle_response_sequence_regex(
+                    match,
+                    clause_raw,
+                    run_artifact,
+                    confidence_history,
+                )
+            if handler is _handle_response_matches_regex:
+                return _handle_response_matches_regex(
+                    match,
+                    clause_raw,
+                    run_artifact,
+                    confidence_history,
+                )
+            if handler is _handle_response_not_matches_regex:
+                return _handle_response_not_matches_regex(
+                    match,
+                    clause_raw,
+                    run_artifact,
+                    confidence_history,
+                )
             return handler(match, clause_raw, run_artifact)
 
     # Unknown clause: keep evaluator robust and transparent.
@@ -830,7 +970,12 @@ def _evaluate_clause(clause: str, run_artifact: Any) -> ClauseEval:
     )
 
 
-def _evaluate_detection_expression(detection: str, run_artifact: Any) -> ClauseEval:
+def _evaluate_detection_expression(
+    detection: str,
+    run_artifact: Any,
+    *,
+    confidence_history: dict[str, Any] | None = None,
+) -> ClauseEval:
     """Evaluate a simple detection expression with AND/OR operators."""
     expr = detection.strip()
     if not expr:
@@ -856,20 +1001,27 @@ def _evaluate_detection_expression(detection: str, run_artifact: Any) -> ClauseE
     or_groups = _split_expression_top_level(expr, "OR")
     group_results: list[ClauseEval] = []
     unsupported_clauses: list[str] = []
+    pattern_observations: list[dict[str, Any]] = []
 
     for group in or_groups:
         and_clauses = _split_expression_top_level(group, "AND")
-        clause_results = [_evaluate_clause(c, run_artifact) for c in and_clauses]
+        clause_results = [
+            _evaluate_clause(c, run_artifact, confidence_history=confidence_history)
+            for c in and_clauses
+        ]
         group_matched = all(c.matched for c in clause_results)
         group_applicable = all(c.applicable for c in clause_results)
         group_confidence = min((c.confidence for c in clause_results), default=1.0)
         evidence: list[str] = []
+        group_pattern_observations: list[dict[str, Any]] = []
         for c in clause_results:
             evidence.append(c.details)
             if c.evidence:
                 evidence.extend(c.evidence)
             if c.unsupported_clauses:
                 unsupported_clauses.extend(c.unsupported_clauses)
+            if c.pattern_observations:
+                group_pattern_observations.extend(c.pattern_observations)
         group_results.append(
             ClauseEval(
                 matched=group_matched,
@@ -877,8 +1029,10 @@ def _evaluate_detection_expression(detection: str, run_artifact: Any) -> ClauseE
                 details=f"AND-group: {group}",
                 evidence=evidence,
                 confidence=group_confidence,
+                pattern_observations=group_pattern_observations or None,
             )
         )
+        pattern_observations.extend(group_pattern_observations)
 
     matched = any(g.matched for g in group_results)
     applicable = any(g.applicable for g in group_results)
@@ -898,6 +1052,8 @@ def _evaluate_detection_expression(detection: str, run_artifact: Any) -> ClauseE
         confidence = min(0.8, group_confidence_aggregate)
     else:
         confidence = group_confidence_aggregate
+    if unsupported_unique:
+        confidence = max(0.0, confidence - min(0.4, len(unsupported_unique) * 0.08))
 
     return ClauseEval(
         matched=matched,
@@ -906,6 +1062,7 @@ def _evaluate_detection_expression(detection: str, run_artifact: Any) -> ClauseE
         evidence=evidence,
         confidence=confidence,
         unsupported_clauses=unsupported_unique or None,
+        pattern_observations=pattern_observations or None,
     )
 
 
@@ -1302,6 +1459,8 @@ def _artifact_view_for_turn_assertion(
 def run_all_checks(
     run_artifact: Any,
     scenario: dict,
+    *,
+    confidence_reports_root: str | Path | None = None,
 ) -> list[CheckResult]:
     """
     Run deterministic checks derived from scenario failure modes.
@@ -1313,6 +1472,12 @@ def run_all_checks(
     """
     checks: list[CheckResult] = []
     unsupported_clauses_seen: list[str] = []
+    all_pattern_observations: list[dict[str, Any]] = []
+    confidence_history = (
+        load_detection_confidence_history(confidence_reports_root)
+        if confidence_reports_root is not None
+        else None
+    )
     failure_modes = scenario.get("failure_modes", [])
 
     for idx, fm in enumerate(failure_modes):
@@ -1321,9 +1486,19 @@ def run_all_checks(
         detection = str(fm.get("detection", "")).strip()
         check_name = _normalize_check_name(name)
 
-        eval_result = _evaluate_detection_expression(detection, run_artifact)
+        eval_result = _evaluate_detection_expression(
+            detection,
+            run_artifact,
+            confidence_history=confidence_history,
+        )
         if eval_result.unsupported_clauses:
             unsupported_clauses_seen.extend(eval_result.unsupported_clauses)
+        check_pattern_observations = annotate_pattern_observations(
+            eval_result.pattern_observations,
+            expression_matched=eval_result.matched if eval_result.applicable else False,
+            unsupported_clause_count=len(eval_result.unsupported_clauses or []),
+        )
+        all_pattern_observations.extend(check_pattern_observations)
 
         if not eval_result.applicable:
             checks.append(
@@ -1337,6 +1512,7 @@ def run_all_checks(
                     evidence=eval_result.evidence,
                     confidence=eval_result.confidence,
                     unsupported_clauses=eval_result.unsupported_clauses,
+                    pattern_observations=check_pattern_observations or None,
                 )
             )
             continue
@@ -1353,6 +1529,7 @@ def run_all_checks(
                     evidence=eval_result.evidence,
                     confidence=eval_result.confidence,
                     unsupported_clauses=eval_result.unsupported_clauses,
+                    pattern_observations=check_pattern_observations or None,
                 )
             )
         else:
@@ -1367,6 +1544,7 @@ def run_all_checks(
                     evidence=eval_result.evidence,
                     confidence=eval_result.confidence,
                     unsupported_clauses=eval_result.unsupported_clauses,
+                    pattern_observations=check_pattern_observations or None,
                 )
             )
 
@@ -1395,9 +1573,19 @@ def run_all_checks(
             )
             continue
 
-        eval_result = _evaluate_detection_expression(str(detection), run_artifact)
+        eval_result = _evaluate_detection_expression(
+            str(detection),
+            run_artifact,
+            confidence_history=confidence_history,
+        )
         if eval_result.unsupported_clauses:
             unsupported_clauses_seen.extend(eval_result.unsupported_clauses)
+        check_pattern_observations = annotate_pattern_observations(
+            eval_result.pattern_observations,
+            expression_matched=eval_result.matched if eval_result.applicable else False,
+            unsupported_clause_count=len(eval_result.unsupported_clauses or []),
+        )
+        all_pattern_observations.extend(check_pattern_observations)
         if not eval_result.applicable:
             checks.append(
                 CheckResult(
@@ -1411,6 +1599,7 @@ def run_all_checks(
                     evidence=eval_result.evidence,
                     confidence=eval_result.confidence,
                     unsupported_clauses=eval_result.unsupported_clauses,
+                    pattern_observations=check_pattern_observations or None,
                 )
             )
             continue
@@ -1428,6 +1617,7 @@ def run_all_checks(
                     evidence=eval_result.evidence,
                     confidence=eval_result.confidence,
                     unsupported_clauses=eval_result.unsupported_clauses,
+                    pattern_observations=check_pattern_observations or None,
                 )
             )
         else:
@@ -1443,6 +1633,7 @@ def run_all_checks(
                     evidence=eval_result.evidence,
                     confidence=eval_result.confidence,
                     unsupported_clauses=eval_result.unsupported_clauses,
+                    pattern_observations=check_pattern_observations or None,
                 )
             )
 
@@ -1480,9 +1671,19 @@ def run_all_checks(
             turn_start=turn_start,
             turn_end=turn_end,
         )
-        eval_result = _evaluate_detection_expression(str(detection), filtered_view)
+        eval_result = _evaluate_detection_expression(
+            str(detection),
+            filtered_view,
+            confidence_history=confidence_history,
+        )
         if eval_result.unsupported_clauses:
             unsupported_clauses_seen.extend(eval_result.unsupported_clauses)
+        check_pattern_observations = annotate_pattern_observations(
+            eval_result.pattern_observations,
+            expression_matched=eval_result.matched if eval_result.applicable else False,
+            unsupported_clause_count=len(eval_result.unsupported_clauses or []),
+        )
+        all_pattern_observations.extend(check_pattern_observations)
 
         window_desc_parts: list[str] = []
         if isinstance(turn_start, int):
@@ -1505,6 +1706,7 @@ def run_all_checks(
                     evidence=eval_result.evidence,
                     confidence=eval_result.confidence,
                     unsupported_clauses=eval_result.unsupported_clauses,
+                    pattern_observations=check_pattern_observations or None,
                 )
             )
             continue
@@ -1522,6 +1724,7 @@ def run_all_checks(
                     evidence=eval_result.evidence,
                     confidence=eval_result.confidence,
                     unsupported_clauses=eval_result.unsupported_clauses,
+                    pattern_observations=check_pattern_observations or None,
                 )
             )
         else:
@@ -1537,6 +1740,7 @@ def run_all_checks(
                     evidence=eval_result.evidence,
                     confidence=eval_result.confidence,
                     unsupported_clauses=eval_result.unsupported_clauses,
+                    pattern_observations=check_pattern_observations or None,
                 )
             )
 
@@ -1555,6 +1759,18 @@ def run_all_checks(
                 unsupported_clauses=unsupported_unique,
             )
         )
+
+    if confidence_reports_root is not None and all_pattern_observations:
+        try:
+            record_detection_pattern_observations(
+                all_pattern_observations,
+                reports_root=confidence_reports_root,
+                run_id=str(getattr(run_artifact, "run_id", "") or ""),
+                scenario_id=str(scenario.get("id", "") or ""),
+            )
+        except Exception:
+            # Confidence history persistence is best-effort and should not block scoring.
+            pass
 
     # Fallback when scenarios omit failure modes (should be rare due schema).
     if not checks:

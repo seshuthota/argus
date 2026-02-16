@@ -963,7 +963,11 @@ def _run_suite_internal(
                     break
                 continue
 
-            check_results = run_all_checks(run_artifact, scenario)
+            check_results = run_all_checks(
+                run_artifact,
+                scenario,
+                confidence_reports_root="reports",
+            )
             llm_judge_meta: dict[str, Any] | None = None
             llm_judge_compare_meta: dict[str, Any] | None = None
             if llm_judge:
@@ -1605,7 +1609,11 @@ def run(
 
     # Evaluate
     console.print(f"\n[yellow]▶ Evaluating...[/yellow]")
-    check_results = run_all_checks(run_artifact, scenario)
+    check_results = run_all_checks(
+        run_artifact,
+        scenario,
+        confidence_reports_root="reports",
+    )
     llm_judge_compare_meta: dict[str, Any] | None = None
     if llm_judge or llm_judge_compare:
         judge_adapter = adapter

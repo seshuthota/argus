@@ -80,6 +80,7 @@ def compute_scores(
             "evidence": cr.evidence,
             "confidence": cr.confidence,
             "unsupported_clauses": cr.unsupported_clauses,
+            "pattern_observations": cr.pattern_observations,
         })
     card.unsupported_detection_count = sum(
         len(c.get("unsupported_clauses") or [])
