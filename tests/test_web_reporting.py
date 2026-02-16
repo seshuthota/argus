@@ -160,6 +160,7 @@ class WebReportingTests(unittest.TestCase):
             self.assertIn("Argus Dashboard", home)
             self.assertIn('/static/css/dashboard.css', home)
             self.assertIn('/static/js/dashboard-app.js', home)
+            self.assertIn('type="module"', home)
 
             run_html = client.get("/runs/run_1").text
             self.assertIn("Argus Dashboard", run_html)
@@ -179,11 +180,16 @@ class WebReportingTests(unittest.TestCase):
 
             css_payload = client.get("/static/css/dashboard.css")
             self.assertEqual(css_payload.status_code, 200)
-            self.assertIn(":root", css_payload.text)
+            self.assertIn("@import", css_payload.text)
+
+            css_tokens = client.get("/static/css/layers/tokens.css")
+            self.assertEqual(css_tokens.status_code, 200)
+            self.assertIn(":root", css_tokens.text)
 
             js_payload = client.get("/static/js/dashboard-app.js")
             self.assertEqual(js_payload.status_code, 200)
             self.assertIn("window.app = app;", js_payload.text)
+            self.assertIn("import { API_BASE }", js_payload.text)
 
             payload = client.get("/api/runs/run_1").json()
             self.assertEqual(payload["scorecard"]["run_id"], "run_1")

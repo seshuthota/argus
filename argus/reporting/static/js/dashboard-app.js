@@ -1,4 +1,22 @@
-    const API_BASE = '/api';
+import { API_BASE } from './app/constants.js';
+import { fetchJSON as fetchJSONInternal } from './app/api.js';
+import { escapeHtml as escapeHtmlInternal, renderMarkdown as renderMarkdownInternal } from './app/utils.js';
+import {
+  renderTranscript as renderTranscriptInternal,
+  buildRunsTable as buildRunsTableInternal,
+  buildReviewQueueTable as buildReviewQueueTableInternal,
+  buildScenariosTable as buildScenariosTableInternal,
+  buildSuitesTable as buildSuitesTableInternal,
+  buildChecksTable as buildChecksTableInternal,
+} from './app/components.js';
+import {
+  ackRun as ackRunAction,
+  rescoreRun as rescoreRunAction,
+  judgeCompareRun as judgeCompareRunAction,
+  rescoreScenario as rescoreScenarioAction,
+  compareFromRun as compareFromRunAction,
+  startScenarioMatrixRun as startScenarioMatrixRunAction,
+} from './app/actions.js';
 
     // Application Logic
     const app = {
@@ -13,9 +31,25 @@
         this.state.darkMode = localStorage.getItem('theme') === 'dark' ||
           (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
         this.applyTheme();
+        this.bindStaticUiEvents();
 
         window.addEventListener('popstate', () => this.handleRoute());
         this.handleRoute(); // Initial load
+      },
+
+      bindStaticUiEvents() {
+        document.querySelectorAll('[data-nav-path]').forEach((el) => {
+          el.addEventListener('click', (event) => {
+            const path = el.getAttribute('data-nav-path');
+            if (!path) return;
+            this.navigate(event, path);
+          });
+        });
+
+        const themeToggle = document.querySelector('[data-action="toggle-theme"]');
+        if (themeToggle) {
+          themeToggle.addEventListener('click', () => this.toggleTheme());
+        }
       },
 
       toggleTheme() {
@@ -630,12 +664,7 @@
       },
 
       compareFromRun(runId) {
-        const other = prompt('Compare this run against run_id:');
-        if (!other) return;
-        const url = new URL(window.location.origin + '/compare');
-        url.searchParams.set('left', runId);
-        url.searchParams.set('right', other.trim());
-        this.navigate(null, url.pathname + url.search);
+        return compareFromRunAction(this, runId);
       },
 
       async renderScenarioList(root) {
@@ -1020,25 +1049,7 @@
       },
 
       async startScenarioMatrixRun(scenarioId) {
-        const models = Array.from(document.querySelectorAll('.matrix-model:checked')).map(x => x.value);
-        const toolModes = Array.from(document.querySelectorAll('.matrix-tool-mode:checked')).map(x => x.value);
-        const aiCompare = !!document.getElementById('matrix-ai-compare')?.checked;
-        if (models.length === 0) return alert('Select at least one model.');
-        if (toolModes.length === 0) return alert('Select at least one tool mode.');
-        if (!confirm(`Run ${scenarioId} across ${models.length} model(s) x ${toolModes.length} tool mode(s)?`)) return;
-        try {
-          const res = await fetch(`${API_BASE}/scenarios/${scenarioId}/run-matrix`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ models, tool_modes: toolModes, ai_compare: aiCompare, judge_model: 'MiniMax-M2.5' })
-          });
-          if (!res.ok) throw new Error('Failed to start run');
-          const out = await res.json();
-          if (out.job_id) this.navigate(null, `/jobs/${out.job_id}`);
-          else alert('Started, but no job_id returned.');
-        } catch (err) {
-          alert('Error: ' + err.message);
-        }
+        return startScenarioMatrixRunAction(this, scenarioId);
       },
 
       async renderSuiteList(root) {
@@ -1094,401 +1105,60 @@
       // --- Components ---
 
       renderTranscript(steps, systemPrompt) {
-        if (!steps || steps.length === 0) return '<div class="empty-state">No transcript available</div>';
-
-        let html = '<div class="chat-transcript">';
-
-        // Add System Prompt if available
-        const hasSystemInSteps = steps.some(
-          (s) => s && s.type === 'message' && s.actor === 'system'
-        );
-        if (systemPrompt && !hasSystemInSteps) {
-          html += `
-              <div class="message-row system">
-                <div class="message-avatar">⚙️</div>
-                <div class="message-body">
-                  <div class="message-meta">
-                    <strong>SYSTEM</strong>
-                  </div>
-                  <div class="message-bubble">
-                    ${this.renderMarkdown(systemPrompt)}
-                  </div>
-                </div>
-              </div>
-            `;
-        }
-
-        // Render rest of transcript
-        steps.forEach(step => {
-          if (step.type === 'message') {
-            const role = step.actor; // user, assistant, system
-            const content = step.payload.content || '';
-            const reasoning = step.payload.reasoning_content;
-            html += `
-                  <div class="message-row ${role}">
-                    ${role !== 'user' ? `<div class="message-avatar">${role === 'assistant' ? '🤖' : '⚙️'}</div>` : ''}
-                    <div class="message-body">
-                      <div class="message-meta">
-                        <strong>${role.toUpperCase()}</strong>
-                        <span>Turn ${step.turn}</span>
-                      </div>
-                      ${reasoning ? `
-                        <div class="thinking-block">
-                          <div class="thinking-header">Thinking Process</div>
-                          <div class="thinking-content">${this.renderMarkdown(reasoning)}</div>
-                        </div>
-                        <div class="divider"></div>` : ''}
-                      <div class="message-bubble">
-                        ${this.renderMarkdown(content)}
-                      </div>
-                    </div>
-                  </div>
-                `;
-          } else if (step.type === 'tool_call') {
-            html += `
-                 <div class="message-row assistant">
-                    <div class="message-avatar">🛠️</div>
-                    <div class="message-body">
-                      <div class="tool-block">
-                        <div class="tool-header">
-                            <span class="tool-name">${this.escapeHtml(step.payload.name)}</span>
-                            <span class="badge neutral">CALL</span>
-                        </div>
-                        <pre class="tool-args">${this.escapeHtml(JSON.stringify(step.payload.arguments, null, 2))}</pre>
-                      </div>
-                    </div>
-                 </div>
-                `;
-          } else if (step.type === 'tool_result') {
-            html += `
-                 <div class="message-row assistant">
-                    <div class="message-avatar">↪️</div>
-                    <div class="message-body">
-                      <div class="tool-block">
-                        <div class="tool-header">
-                            <span class="tool-name">${this.escapeHtml(step.payload.name)}</span>
-                            <span class="badge ${step.payload.result.error ? 'error' : 'success'}">RESULT</span>
-                        </div>
-                        <pre class="tool-result">${this.escapeHtml(JSON.stringify(step.payload.result, null, 2))}</pre>
-                      </div>
-                    </div>
-                 </div>
-                `;
-          }
+        return renderTranscriptInternal(steps, systemPrompt, {
+          escapeHtml: this.escapeHtml.bind(this),
+          renderMarkdown: this.renderMarkdown.bind(this),
         });
-        html += `</div>`;
-        return html;
       },
 
       buildRunsTable(items) {
-        if (!items || items.length === 0) return '<div class="text-muted">No runs found.</div>';
-        return `
-          <div class="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Run ID</th>
-                  <th>Scenario</th>
-                  <th>Scenario Ver</th>
-                  <th>Model</th>
-                  <th>Tool Mode</th>
-                  <th>Status</th>
-                  <th>Grade</th>
-                  <th>Duration</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${items.map(row => `
-                  <tr onclick="app.navigate(event, '/runs/${row.run_id}')" style="cursor:pointer">
-                    <td><a href="/runs/${row.run_id}" onclick="event.preventDefault()">${row.run_id}</a></td>
-                    <td>${this.escapeHtml(row.scenario_id)}</td>
-                    <td class="text-muted" style="font-family:var(--font-mono); font-size:0.85rem;">${this.escapeHtml(row.scenario_version || '')}</td>
-                    <td>${this.escapeHtml(row.model)}</td>
-                    <td>
-                      <span class="badge warning">
-                        ${this.escapeHtml(row.tool_gate_mode || 'enforce')}
-                      </span>
-                    </td>
-                    <td>
-                      <span class="badge ${row.passed ? 'success' : 'error'}">
-                        ${row.passed ? 'PASS' : 'FAIL'}
-                      </span>
-                    </td>
-                    <td>${row.grade}</td>
-                    <td>${row.duration_seconds.toFixed(2)}s</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        `;
+        return buildRunsTableInternal(items, { escapeHtml: this.escapeHtml.bind(this) });
       },
 
       buildReviewQueueTable(items) {
-        if (!items || items.length === 0) return '<div class="text-muted">No runs require review for current filters.</div>';
-        return `
-          <div class="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Run ID</th>
-                  <th>Scenario</th>
-                  <th>Model</th>
-                  <th>Status</th>
-                  <th>Score</th>
-                  <th>Reasons</th>
-                  <th>Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${items.map(row => `
-                  <tr onclick="app.navigate(event, '/runs/${row.run_id}')" style="cursor:pointer">
-                    <td><a href="/runs/${row.run_id}" onclick="event.preventDefault()">${row.run_id}</a></td>
-                    <td>${this.escapeHtml(row.scenario_id)}</td>
-                    <td>${this.escapeHtml(row.model)}</td>
-                    <td>
-                      <span class="badge ${row.passed ? 'success' : 'error'}">
-                        ${row.passed ? 'PASS' : 'FAIL'}
-                      </span>
-                    </td>
-                    <td>${row.review_score}</td>
-                    <td>${(row.reasons || []).map(reason => `<span class="badge warning" style="margin-right:4px">${this.escapeHtml(reason)}</span>`).join('')}</td>
-                    <td><span class="text-muted">${this.escapeHtml(row.updated_at)}</span></td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        `;
+        return buildReviewQueueTableInternal(items, { escapeHtml: this.escapeHtml.bind(this) });
       },
 
       buildScenariosTable(items) {
-        if (!items || items.length === 0) return '<div class="text-muted">No scenarios found.</div>';
-        return `
-            <div class="table-container">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Scenario ID</th>
-                    <th>Name</th>
-                    <th>Ver</th>
-                    <th>Interface</th>
-                    <th>Stakes</th>
-                    <th>Runs</th>
-                    <th>Pass Rate</th>
-                    <th>Latest Update</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${items.map(row => `
-                    <tr onclick="app.navigate(event, '/scenarios/${row.scenario_id}')" style="cursor:pointer">
-                      <td>
-                        <a href="/scenarios/${row.scenario_id}" onclick="event.preventDefault()">${this.escapeHtml(row.scenario_id)}</a>
-                        ${row.has_yaml ? '' : '<span class="badge warning" style="margin-left:8px;">missing yaml</span>'}
-                      </td>
-                      <td class="text-muted">${this.escapeHtml(row.name || '')}</td>
-                      <td class="text-muted" style="font-family:var(--font-mono); font-size:0.85rem;">${this.escapeHtml(row.version || '')}</td>
-                      <td class="text-muted">${this.escapeHtml(row.interface || '')}</td>
-                      <td class="text-muted">${this.escapeHtml(row.stakes || '')}</td>
-                      <td>${row.run_count}</td>
-                      <td>
-                        ${row.run_count > 0
-                          ? `<span class="badge ${row.pass_rate >= 0.8 ? 'success' : row.pass_rate >= 0.5 ? 'warning' : 'error'}">
-                              ${(row.pass_rate * 100).toFixed(1)}%
-                             </span>`
-                          : '<span class="badge neutral">No runs</span>'
-                        }
-                      </td>
-                      <td><span class="text-muted">${this.escapeHtml(row.latest_updated_at || 'n/a')}</span></td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-          `;
+        return buildScenariosTableInternal(items, { escapeHtml: this.escapeHtml.bind(this) });
       },
 
       buildSuitesTable(items) {
-        if (!items || items.length === 0) return '<div class="text-muted">No suites found.</div>';
-        return `
-            <div class="table-container">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Suite ID</th>
-                    <th>Model</th>
-                    <th>Pass Rate</th>
-                    <th>Avg Severity</th>
-                    <th>Updated</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${items.map(row => `
-                    <tr onclick="app.navigate(event, '/suites/${row.suite_id}')" style="cursor:pointer">
-                      <td><a href="/suites/${row.suite_id}" onclick="event.preventDefault()">${row.suite_id}</a></td>
-                      <td>${this.escapeHtml(row.model)}</td>
-                      <td>
-                         <span class="badge ${row.pass_rate >= 0.8 ? 'success' : row.pass_rate >= 0.5 ? 'warning' : 'error'}">
-                          ${(row.pass_rate * 100).toFixed(1)}%
-                        </span>
-                      </td>
-                      <td>${row.avg_total_severity.toFixed(2)}</td>
-                      <td><span class="text-muted">${row.updated_at}</span></td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-          `;
+        return buildSuitesTableInternal(items, { escapeHtml: this.escapeHtml.bind(this) });
       },
 
       buildChecksTable(checks) {
-        if (!checks || checks.length === 0) return '<div class="text-muted">No checks recorded.</div>';
-        return `
-          <div class="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Check Name</th>
-                  <th>Kind</th>
-                  <th>Status</th>
-                  <th>AI</th>
-                  <th>Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${checks.map(check => {
-          const isSuccess = check.kind === 'success';
-          const isPass = check.passed;
-          const ai = check.llm_judge;
-          const aiHas = !!ai && (typeof ai.passed === 'boolean' || ai.passed === true || ai.passed === false);
-          const aiPass = aiHas ? !!ai.passed : null;
-          const aiDisagrees = !!check.llm_judge_disagrees;
-          // For failure modes: passed=true means it was NOT triggered (Good), passed=false means it WAS triggered (Bad)
-          // For success criteria: passed=true (Good), passed=false (Bad)
-
-          let badgeClass = isPass ? 'success' : 'error';
-          let statusText = isPass ? (isSuccess ? 'PASS' : 'NOT TRIGGERED') : (isSuccess ? 'FAIL' : 'TRIGGERED');
-
-          return `
-                  <tr>
-                    <td style="font-weight:500; font-family:var(--font-mono); font-size:0.85rem;">${this.escapeHtml(check.name)}</td>
-                    <td><span class="badge neutral">${this.escapeHtml(check.kind)}</span></td>
-                    <td><span class="badge ${badgeClass}">${statusText}</span></td>
-                    <td>
-                      ${aiHas
-                        ? `<span class="badge ${aiPass ? 'success' : 'error'}">${aiPass ? 'PASS' : 'FAIL'}</span>${aiDisagrees ? ' <span class=\"badge warning\">diff</span>' : ''}`
-                        : '<span class="badge neutral">-</span>'
-                      }
-                    </td>
-                    <td class="text-muted" style="font-size:0.85rem">${this.escapeHtml(check.details || '')}</td>
-                  </tr>
-                  `;
-        }).join('')}
-              </tbody>
-            </table>
-          </div>
-        `;
+        return buildChecksTableInternal(checks, { escapeHtml: this.escapeHtml.bind(this) });
       },
 
       // --- Utility ---
 
       async fetchJSON(url) {
-        // Add cache busting
-        const separator = url.includes('?') ? '&' : '?';
-        const bustedUrl = `${url}${separator}_=${Date.now()}`;
-        const res = await fetch(bustedUrl);
-        if (!res.ok) throw new Error(`API Error: ${res.status}`);
-        return res.json();
+        return fetchJSONInternal(url);
       },
 
       renderMarkdown(text) {
-        if (!text) return '';
-        try {
-          // marked is globally available from the CDN script
-          return marked.parse(text);
-        } catch (err) {
-          console.error("Markdown rendering failed", err);
-          return this.escapeHtml(text);
-        }
+        return renderMarkdownInternal(text, { escapeHtml: this.escapeHtml.bind(this) });
       },
 
       escapeHtml(str) {
-        if (!str) return '';
-        return String(str).replace(/[&<>"']/g, (m) => ({
-          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-        })[m]);
+        return escapeHtmlInternal(str);
       },
 
       async ackRun(runId) {
-        if (!confirm("Mark this run as reviewed? It will be removed from the active queue.")) return;
-
-        const btn = document.getElementById('btn-ack');
-        if (btn) btn.disabled = true;
-
-        try {
-          const res = await fetch(`${API_BASE}/runs/${runId}/review`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'acknowledge' })
-          });
-          if (!res.ok) throw new Error("Failed to acknowledge run");
-
-          // Success: navigate back to queue or refresh
-          // Let's go back to queue to show it's done
-          this.navigate(null, '/review-queue');
-        } catch (err) {
-          alert("Error: " + err.message);
-          if (btn) btn.disabled = false;
-        }
+        return ackRunAction(this, runId);
       },
 
       async rescoreRun(runId) {
-        if (!confirm("Rescore this run using the latest scenario YAML?")) return;
-        try {
-          const res = await fetch(`${API_BASE}/runs/${runId}/rescore`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason: 'dashboard_rescore' })
-          });
-          if (!res.ok) throw new Error("Failed to rescore run");
-          // Reload current route so updated scorecard/checks render.
-          this.handleRoute();
-        } catch (err) {
-          alert("Error: " + err.message);
-        }
+        return rescoreRunAction(this, runId);
       },
 
       async judgeCompareRun(runId) {
-        if (!confirm("Run AI Compare for this run using MiniMax-M2.5? This will call the model and may cost money.")) return;
-        try {
-          const res = await fetch(`${API_BASE}/runs/${runId}/judge-compare`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ judge_model: 'MiniMax-M2.5' })
-          });
-          if (!res.ok) throw new Error("Failed to run AI compare");
-          this.handleRoute();
-        } catch (err) {
-          alert("Error: " + err.message);
-        }
+        return judgeCompareRunAction(this, runId);
       },
 
       async rescoreScenario(scenarioId) {
-        if (!confirm(`Rescore all runs for ${scenarioId} using the latest scenario YAML?`)) return;
-        try {
-          const res = await fetch(`${API_BASE}/scenarios/${scenarioId}/rescore`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason: 'dashboard_bulk_rescore' })
-          });
-          if (!res.ok) throw new Error("Failed to rescore scenario");
-          const data = await res.json();
-          const skipped = (data.skipped_runs ?? 0);
-          alert(`Rescore complete. Candidate=${data.candidate_runs} Rescored=${data.rescored_runs} Skipped=${skipped} Changed=${data.changed_runs} Errors=${(data.errors || []).length}`);
-          this.handleRoute();
-        } catch (err) {
-          alert("Error: " + err.message);
-        }
+        return rescoreScenarioAction(this, scenarioId);
       },
 
       changePage(newPage) {
