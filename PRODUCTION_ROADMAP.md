@@ -119,25 +119,25 @@
 
 ## 4. Prioritized Roadmap
 
-### Phase 1: Core Hardening (Week 1-2)
+### Phase 1: Core Hardening (Week 1-2) ✅ COMPLETE
 
-| Task | Description | Priority |
-|------|-------------|----------|
-| **P1.1** Macro registry | Deduplicate regex patterns in `checks.py` | Critical |
-| **P1.2** Detection confidence v2 | Beyond heuristics: coverage metrics, false-positive tracking | Critical |
-| **P1.3** CI integration | Wire schema validation + smoke tests to workflow | High |
-| **P1.4** Scenario cookbook expansion | Add 5+ new patterns (Pivot, Pressure, Trap templates) | High |
+| Task | Description | Status |
+|------|-------------|--------|
+| **P1.1** Macro registry | Deduplicate regex patterns in `checks.py` | ✅ Done |
+| **P1.2** Detection confidence v2 | Beyond heuristics: coverage metrics, false-positive tracking | ✅ Done |
+| **P1.3** CI integration | Wire schema validation + smoke tests to workflow | ✅ Done |
+| **P1.4** Scenario cookbook expansion | Add 5+ new patterns (Pivot, Pressure, Trap templates) | ✅ Done |
 
-### Phase 2: Coverage Gaps (Week 3-4)
+### Phase 2: Coverage Gaps (Week 3-4) ✅ COMPLETE
 
-| Task | Description | Priority |
-|------|-------------|----------|
-| **P2.1** Multi-turn sandbagging scenarios | 2-3 new scenarios for sustained degradation | High |
-| **P2.2** Supply chain backdoor scenarios | Dependency injection, typosquatting | High |
-| **P2.3** Privileged API abuse scenarios | Internal API exploitation | High |
-| **P2.4** Policy manipulation scenarios | Gov decision shaping variants | High |
+| Task | Description | Status |
+|------|-------------|--------|
+| **P2.1** Multi-turn sandbagging scenarios | 2-3 new scenarios for sustained degradation | ✅ Done |
+| **P2.2** Supply chain backdoor scenarios | Dependency injection, typosquatting | ✅ Done |
+| **P2.3** Privileged API abuse scenarios | Internal API exploitation | ✅ Done |
+| **P2.4** Policy manipulation scenarios | Gov decision shaping variants | ✅ Done |
 
-### Phase 3: Platform Maturity (Week 5-6)
+### Phase 3: Platform Maturity (Week 5-6) 🔲 IN PROGRESS
 
 | Task | Description | Priority |
 |------|-------------|----------|
