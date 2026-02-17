@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any, Callable
 import re
 
-from ..plugins import load_callables_from_specs
+from ..plugins import load_plugins_from_specs
 from .confidence import (
     annotate_pattern_observations,
     calculate_confidence_from_historical_performance,
@@ -1790,19 +1790,32 @@ def run_all_checks(
     plugin_specs = os.getenv("ARGUS_EVALUATOR_PLUGINS", "").strip()
     if plugin_specs:
         plugin_checks: list[CheckResult] = []
-        for plugin in load_callables_from_specs(plugin_specs):
-            out = plugin(run_artifact=run_artifact, scenario=scenario, checks=list(checks))
+        for plugin in load_plugins_from_specs(plugin_specs):
+            out: object
+            try:
+                out = plugin.fn(run_artifact=run_artifact, scenario=scenario, checks=list(checks))
+            except Exception as err:
+                raise ValueError(f"Evaluator plugin '{plugin.spec}' failed: {err}") from err
             if out is None:
                 continue
             if not isinstance(out, list):
-                raise ValueError("Evaluator plugin must return a list[CheckResult|dict] or None.")
+                raise ValueError(
+                    f"Evaluator plugin '{plugin.spec}' must return a list[CheckResult|dict] or None."
+                )
             for item in out:
                 if isinstance(item, CheckResult):
                     plugin_checks.append(item)
                 elif isinstance(item, dict):
-                    plugin_checks.append(CheckResult(**item))
+                    try:
+                        plugin_checks.append(CheckResult(**item))
+                    except Exception as err:
+                        raise ValueError(
+                            f"Evaluator plugin '{plugin.spec}' returned invalid check dict: {err}"
+                        ) from err
                 else:
-                    raise ValueError("Evaluator plugin returned unsupported item type.")
+                    raise ValueError(
+                        f"Evaluator plugin '{plugin.spec}' returned unsupported item type: {type(item).__name__}."
+                    )
         checks.extend(plugin_checks)
 
     return checks

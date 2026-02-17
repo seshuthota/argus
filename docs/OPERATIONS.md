@@ -85,6 +85,12 @@ Return either:
 - `ResolveResult`, or
 - `(resolved_model, adapter[, provider_note])`
 
+Validation enforced at runtime:
+
+- `resolved_model` must be non-empty
+- adapter must expose callable `execute_turn(messages, tools, settings)`
+- plugin failures are surfaced with plugin spec context
+
 ### Evaluator Plugins
 
 Set `ARGUS_EVALUATOR_PLUGINS` to comma-separated `module:function` specs.
@@ -102,3 +108,9 @@ Return:
 - `list[CheckResult | dict]`
 
 Plugin checks are appended to deterministic checks in `run_all_checks`.
+
+Validation enforced at runtime:
+
+- plugin must return `None` or `list`
+- dict items must be valid `CheckResult` constructor payloads
+- unsupported item types fail fast with plugin spec context

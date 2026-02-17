@@ -76,6 +76,67 @@ class PluginHookTests(unittest.TestCase):
             finally:
                 sys.path.remove(td)
 
+    def test_model_resolver_plugin_invalid_output_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            plugin_path = Path(td) / "resolver_bad.py"
+            plugin_path.write_text(
+                textwrap.dedent(
+                    """
+                    def custom_resolver(*, model, api_key=None, api_base=None):
+                        return "bad-output"
+                    """
+                )
+            )
+            sys.path.insert(0, td)
+            try:
+                with patch.dict(os.environ, {"ARGUS_MODEL_RESOLVER_PLUGIN": "resolver_bad:custom_resolver"}, clear=False):
+                    with self.assertRaises(ValueError):
+                        resolve_model_and_adapter(model="demo-model")
+            finally:
+                sys.path.remove(td)
+
+    def test_evaluator_plugin_invalid_dict_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            plugin_path = Path(td) / "eval_bad_dict.py"
+            plugin_path.write_text(
+                textwrap.dedent(
+                    """
+                    def add_bad_check(*, run_artifact, scenario, checks):
+                        return [{"name": "missing_required_fields"}]
+                    """
+                )
+            )
+            sys.path.insert(0, td)
+            try:
+                scenario = {"id": "PLUGIN_SCENARIO_001", "failure_modes": [], "success_criteria": []}
+                run_artifact = SimpleNamespace(transcript=[], tool_calls=[])
+                with patch.dict(os.environ, {"ARGUS_EVALUATOR_PLUGINS": "eval_bad_dict:add_bad_check"}, clear=False):
+                    with self.assertRaises(ValueError):
+                        _ = run_all_checks(run_artifact, scenario)
+            finally:
+                sys.path.remove(td)
+
+    def test_evaluator_plugin_unsupported_item_type_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            plugin_path = Path(td) / "eval_bad_item.py"
+            plugin_path.write_text(
+                textwrap.dedent(
+                    """
+                    def add_bad_item(*, run_artifact, scenario, checks):
+                        return [123]
+                    """
+                )
+            )
+            sys.path.insert(0, td)
+            try:
+                scenario = {"id": "PLUGIN_SCENARIO_001", "failure_modes": [], "success_criteria": []}
+                run_artifact = SimpleNamespace(transcript=[], tool_calls=[])
+                with patch.dict(os.environ, {"ARGUS_EVALUATOR_PLUGINS": "eval_bad_item:add_bad_item"}, clear=False):
+                    with self.assertRaises(ValueError):
+                        _ = run_all_checks(run_artifact, scenario)
+            finally:
+                sys.path.remove(td)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,27 @@ class ResolveResult:
     provider_note: str | None = None  # e.g. "openrouter" | "minimax"
 
 
+def _normalize_model_resolver_plugin_output(out: object) -> ResolveResult:
+    """Validate model resolver plugin return value and normalize to ResolveResult."""
+    if isinstance(out, ResolveResult):
+        normalized = out
+    elif isinstance(out, tuple) and len(out) >= 2:
+        resolved_model = str(out[0])
+        adapter = out[1]
+        provider_note = str(out[2]) if len(out) > 2 and out[2] is not None else None
+        normalized = ResolveResult(resolved_model=resolved_model, adapter=adapter, provider_note=provider_note)
+    else:
+        raise ValueError(
+            "Model resolver plugin must return ResolveResult or tuple(resolved_model, adapter[, provider_note])."
+        )
+
+    if not normalized.resolved_model.strip():
+        raise ValueError("Model resolver plugin returned empty resolved_model.")
+    if not hasattr(normalized.adapter, "execute_turn") or not callable(getattr(normalized.adapter, "execute_turn", None)):
+        raise ValueError("Model resolver plugin adapter must implement callable execute_turn(messages, tools, settings).")
+    return normalized
+
+
 def resolve_model_and_adapter(
     *,
     model: str,
@@ -30,15 +51,14 @@ def resolve_model_and_adapter(
     plugin_spec = os.getenv("ARGUS_MODEL_RESOLVER_PLUGIN", "").strip()
     if plugin_spec:
         plugin = load_callable_from_spec(plugin_spec)
-        out = plugin(model=model, api_key=api_key, api_base=api_base)
-        if isinstance(out, ResolveResult):
-            return out
-        if isinstance(out, tuple) and len(out) >= 2:
-            resolved_model = str(out[0])
-            adapter = out[1]
-            provider_note = str(out[2]) if len(out) > 2 and out[2] is not None else None
-            return ResolveResult(resolved_model=resolved_model, adapter=adapter, provider_note=provider_note)
-        raise ValueError("Model resolver plugin must return ResolveResult or tuple(resolved_model, adapter[, provider_note]).")
+        try:
+            out = plugin(model=model, api_key=api_key, api_base=api_base)
+        except Exception as err:
+            raise ValueError(f"Model resolver plugin '{plugin_spec}' failed: {err}") from err
+        try:
+            return _normalize_model_resolver_plugin_output(out)
+        except Exception as err:
+            raise ValueError(f"Model resolver plugin '{plugin_spec}' returned invalid output: {err}") from err
 
     resolved_key = api_key
     resolved_base = api_base or os.getenv("LLM_BASE_URL")
