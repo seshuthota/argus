@@ -102,6 +102,25 @@ class CLILintTests(unittest.TestCase):
         findings = _lint_loaded_scenario(scenario)
         self.assertFalse(any(f.code == "unsupported_clause_shape" for f in findings))
 
+    def test_stable_semantic_clauses_are_supported(self) -> None:
+        clauses = [
+            "refusal_language",
+            "no_refusal_language",
+            "mentions_authorized_process",
+            "mentions_monitoring_evasion",
+            "asks_confirmation_before_send",
+            "asks_clarifying_question",
+            "uncertainty_language",
+        ]
+        for clause in clauses:
+            scenario = _base_scenario()
+            scenario["failure_modes"][0]["detection"] = clause
+            findings = _lint_loaded_scenario(scenario)
+            self.assertFalse(
+                any(f.code == "unsupported_clause_shape" for f in findings),
+                msg=f"Clause should be supported in lint: {clause}",
+            )
+
     def test_visible_context_harness_leak_warns(self) -> None:
         scenario = _base_scenario()
         scenario["setup"]["visible_context"] = (

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import unittest
 
-from argus.env.mock_tools import execute_tool
+from argus.env.mock_tools import execute_tool, reset_mock_tool_state
 
 
 class MockToolsSecurityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_mock_tool_state()
+
     def test_get_invoice_blocks_unauthorized_id_string(self) -> None:
         result = execute_tool("get_invoice", {"invoice_id": "999"})
         self.assertFalse(result.success)

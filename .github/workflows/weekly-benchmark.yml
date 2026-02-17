@@ -22,6 +22,26 @@ on:
         description: "Scenario list for benchmark-matrix"
         required: false
         default: "scenarios/suites/complex_behavior_v1.txt"
+      drift_strict:
+        description: "Fail workflow when drift alert thresholds are exceeded (true|false)"
+        required: false
+        default: "false"
+      drift_window:
+        description: "Trend entries per model considered by drift check"
+        required: false
+        default: "12"
+      drift_max_pass_drop:
+        description: "Drift alert threshold for pass-rate drop"
+        required: false
+        default: "0.08"
+      drift_max_severity_increase:
+        description: "Drift alert threshold for avg total severity increase"
+        required: false
+        default: "0.75"
+      drift_max_anomaly_increase:
+        description: "Drift alert threshold for cross-trial anomaly count increase"
+        required: false
+        default: "3"
 
 jobs:
   benchmark:
@@ -82,6 +102,34 @@ jobs:
             --window 12 \
             --output reports/suites/trends/weekly_trend_report.md
 
+      - name: Generate drift summary
+        run: |
+          DRIFT_WINDOW="${{ github.event.inputs.drift_window || '12' }}"
+          DRIFT_MAX_PASS_DROP="${{ github.event.inputs.drift_max_pass_drop || '0.08' }}"
+          DRIFT_MAX_SEVERITY_INCREASE="${{ github.event.inputs.drift_max_severity_increase || '0.75' }}"
+          DRIFT_MAX_ANOMALY_INCREASE="${{ github.event.inputs.drift_max_anomaly_increase || '3' }}"
+          DRIFT_STRICT="${{ github.event.inputs.drift_strict || 'false' }}"
+
+          # Scheduled runs are strict by default to catch regressions early.
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            DRIFT_STRICT="true"
+          fi
+
+          STRICT_FLAG=""
+          if [ "${DRIFT_STRICT}" = "true" ]; then
+            STRICT_FLAG="--strict"
+          fi
+
+          python -m argus.cli trend-drift-check \
+            --trend-dir reports/suites/trends \
+            --window "${DRIFT_WINDOW}" \
+            --max-pass-drop "${DRIFT_MAX_PASS_DROP}" \
+            --max-severity-increase "${DRIFT_MAX_SEVERITY_INCREASE}" \
+            --max-anomaly-increase "${DRIFT_MAX_ANOMALY_INCREASE}" \
+            --output reports/suites/trends/weekly_drift_report.md \
+            --output-json reports/suites/trends/weekly_drift_report.json \
+            ${STRICT_FLAG}
+
       - name: Run benchmark matrix
         run: |
           TRIALS="${{ github.event.inputs.trials || '1' }}"
@@ -132,6 +180,7 @@ jobs:
             reports/suites/matrix/**/*.json
             reports/suites/matrix/**/*.md
             reports/suites/trends/*.jsonl
+            reports/suites/trends/*.json
             reports/suites/trends/*.md
             reports/suites/behavior/*.md
             reports/visuals/**/*.svg

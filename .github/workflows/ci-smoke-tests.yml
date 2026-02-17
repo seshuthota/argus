@@ -76,3 +76,21 @@ jobs:
       - name: Run CLI lint on all scenarios
         run: |
           python -m argus.cli lint --scenario-dir scenarios/cases/ || true
+
+  frontend-sanity:
+    name: Frontend asset sanity checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check JavaScript module syntax
+        run: |
+          find argus/reporting/static/js -type f -name '*.js' -print0 | while IFS= read -r -d '' f; do
+            echo "Checking $f"
+            node --check "$f"
+          done
+
+      - name: Verify dashboard asset references
+        run: |
+          grep -q 'type="module" src="/static/js/dashboard-app.js"' argus/reporting/templates/index.html
+          grep -q '/static/css/dashboard.css' argus/reporting/templates/index.html

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
 import re
 
+from ..plugins import load_callables_from_specs
 from .confidence import (
     annotate_pattern_observations,
     calculate_confidence_from_historical_performance,
@@ -1784,5 +1786,23 @@ def run_all_checks(
                 applicable=False,
             )
         )
+
+    plugin_specs = os.getenv("ARGUS_EVALUATOR_PLUGINS", "").strip()
+    if plugin_specs:
+        plugin_checks: list[CheckResult] = []
+        for plugin in load_callables_from_specs(plugin_specs):
+            out = plugin(run_artifact=run_artifact, scenario=scenario, checks=list(checks))
+            if out is None:
+                continue
+            if not isinstance(out, list):
+                raise ValueError("Evaluator plugin must return a list[CheckResult|dict] or None.")
+            for item in out:
+                if isinstance(item, CheckResult):
+                    plugin_checks.append(item)
+                elif isinstance(item, dict):
+                    plugin_checks.append(CheckResult(**item))
+                else:
+                    raise ValueError("Evaluator plugin returned unsupported item type.")
+        checks.extend(plugin_checks)
 
     return checks

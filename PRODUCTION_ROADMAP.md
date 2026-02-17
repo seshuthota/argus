@@ -119,39 +119,39 @@
 
 ## 4. Prioritized Roadmap
 
-### Phase 1: Core Hardening (Week 1-2)
+### Phase 1: Core Hardening (Week 1-2) ✅ COMPLETE
 
-| Task | Description | Priority |
-|------|-------------|----------|
-| **P1.1** Macro registry | Deduplicate regex patterns in `checks.py` | Critical |
-| **P1.2** Detection confidence v2 | Beyond heuristics: coverage metrics, false-positive tracking | Critical |
-| **P1.3** CI integration | Wire schema validation + smoke tests to workflow | High |
-| **P1.4** Scenario cookbook expansion | Add 5+ new patterns (Pivot, Pressure, Trap templates) | High |
+| Task | Description | Status |
+|------|-------------|--------|
+| **P1.1** Macro registry | Deduplicate regex patterns in `checks.py` | ✅ Done |
+| **P1.2** Detection confidence v2 | Beyond heuristics: coverage metrics, false-positive tracking | ✅ Done |
+| **P1.3** CI integration | Wire schema validation + smoke tests to workflow | ✅ Done |
+| **P1.4** Scenario cookbook expansion | Add 5+ new patterns (Pivot, Pressure, Trap templates) | ✅ Done |
 
-### Phase 2: Coverage Gaps (Week 3-4)
+### Phase 2: Coverage Gaps (Week 3-4) ✅ COMPLETE
 
-| Task | Description | Priority |
-|------|-------------|----------|
-| **P2.1** Multi-turn sandbagging scenarios | 2-3 new scenarios for sustained degradation | High |
-| **P2.2** Supply chain backdoor scenarios | Dependency injection, typosquatting | High |
-| **P2.3** Privileged API abuse scenarios | Internal API exploitation | High |
-| **P2.4** Policy manipulation scenarios | Gov decision shaping variants | High |
+| Task | Description | Status |
+|------|-------------|--------|
+| **P2.1** Multi-turn sandbagging scenarios | 2-3 new scenarios for sustained degradation | ✅ Done |
+| **P2.2** Supply chain backdoor scenarios | Dependency injection, typosquatting | ✅ Done |
+| **P2.3** Privileged API abuse scenarios | Internal API exploitation | ✅ Done |
+| **P2.4** Policy manipulation scenarios | Gov decision shaping variants | ✅ Done |
 
-### Phase 3: Platform Maturity (Week 5-6)
+### Phase 3: Platform Maturity (Week 5-6) ✅ COMPLETE
 
-| Task | Description | Priority |
-|------|-------------|----------|
-| **P3.1** Remote artifact storage | S3/GCS support for reports | Medium |
-| **P3.2** Model benchmark suite | Pre-built suites for common models | Medium |
-| **P3.3** Alerting & thresholds | Configurable pass/fail gates | Medium |
-| **P3.4** Realistic tool simulation | Expand mock_tools.py with more scenarios | Medium |
+| Task | Description | Status |
+|------|-------------|--------|
+| **P3.1** Remote artifact storage | S3/GCS support for reports | ✅ Done |
+| **P3.2** Model benchmark suite | Pre-built suites for common models | ✅ Done |
+| **P3.3** Alerting & thresholds | Configurable pass/fail gates + webhook delivery controls | ✅ Done |
+| **P3.4** Realistic tool simulation | Stateful mock tool fixtures with audit + per-run session isolation | ✅ Done |
 
 ### Phase 4: Advanced Features (Week 7+)
 
 | Task | Description | Priority |
 |------|-------------|----------|
 | **P4.1** Continuous monitoring | Scheduled eval runs + drift detection | Low |
-| **P4.2** Plugin architecture | Custom evaluators, adapters | Low |
+| **P4.2** Plugin architecture | Custom evaluators, adapters | 🔲 Foundation Added |
 | **P4.3** Collaborative review | Multi-user feedback workflow | Low |
 | **P4.4** Benchmark leaderboards | Public-facing results | Low |
 
@@ -169,10 +169,10 @@
 
 ## 6. Immediate Next Steps
 
-1. **Start with P1.1 (Macro registry)** — Quick win, clears technical debt
-2. **Expand cookbook patterns** — High ROI for scenario authors
-3. **Fill top coverage gaps** — Multi-turn sandbagging + supply chain
-4. **Wire CI** — Prevents schema drift
+1. **P4.1 Continuous monitoring bootstrap** — Add scheduled benchmark runs (cron/GitHub Actions) with historical drift summaries.
+2. **P4.2 Plugin architecture foundation** — Introduce adapter/evaluator plugin loading contracts and extension points.
+3. **Scenario lint hardening** — Keep scenario DSL/lint parity and drive unsupported clause count toward zero.
+4. **Operational docs** — Document benchmark presets, alert webhook payloads, and tool simulation semantics for contributors.
 
 ---
 

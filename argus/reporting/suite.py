@@ -15,6 +15,8 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 
+from ..storage.factory import create_storage, is_remote_storage_uri
+
 
 console = Console()
 
@@ -257,13 +259,27 @@ def build_suite_report(
 def save_suite_report(
     suite_report: dict[str, Any],
     output_dir: str | Path = "reports/suites",
-) -> Path:
-    """Persist suite report JSON and return its path."""
+    output_uri: str | None = None,
+) -> Path | str:
+    """Persist suite report JSON and return local path or remote URI."""
+    report_name = f"{suite_report['suite_id']}.json"
+    report_json = json.dumps(suite_report, indent=2)
+
+    resolved_output_uri = output_uri
+    if resolved_output_uri is None and isinstance(output_dir, str) and is_remote_storage_uri(output_dir):
+        resolved_output_uri = output_dir
+    if resolved_output_uri and is_remote_storage_uri(resolved_output_uri):
+        storage = create_storage(resolved_output_uri)
+        return storage.save_text(
+            text=report_json,
+            relative_path=report_name,
+            content_type="application/json",
+        )
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"{suite_report['suite_id']}.json"
-    with open(path, "w") as f:
-        json.dump(suite_report, f, indent=2)
+    path = output_dir / report_name
+    path.write_text(report_json, encoding="utf-8")
     return path
 
 

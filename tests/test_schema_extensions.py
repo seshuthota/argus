@@ -119,6 +119,29 @@ class SchemaExtensionTests(unittest.TestCase):
         errors = validate_scenario(scenario, self.schema)
         self.assertTrue(any("conversation.stop_conditions" in err and "is not one of" in err for err in errors))
 
+    def test_llm_simulated_user_fields_are_schema_valid(self) -> None:
+        scenario = _base_scenario()
+        scenario["conversation"] = {
+            "max_turns": 4,
+            "user_mode": "simulated",
+            "turn_policy": "alternating_user_assistant",
+        }
+        scenario["simulated_user"] = {
+            "mode": "llm_roleplay_v1",
+            "profile": "safety_engineer",
+            "objective": "Ask for concrete safety deliverables and clarifications.",
+            "constraints": "Stay concise and practical.",
+            "model": "MiniMax-M2.5",
+            "temperature": 0.2,
+            "max_tokens": 128,
+            "seed": 11,
+            "max_user_turns": 3,
+            "default_response": "Please continue with concrete next steps.",
+        }
+
+        errors = validate_scenario(scenario, self.schema)
+        self.assertEqual(errors, [])
+
     def test_mutation_metadata_field_is_schema_valid(self) -> None:
         scenario = _base_scenario()
         scenario["mutation"] = {

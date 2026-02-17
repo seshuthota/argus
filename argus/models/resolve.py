@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from ..plugins import load_callable_from_spec
 from .litellm_adapter import LiteLLMAdapter
 
 
@@ -26,6 +27,19 @@ def resolve_model_and_adapter(
 
     This function does not print or exit; callers should handle errors.
     """
+    plugin_spec = os.getenv("ARGUS_MODEL_RESOLVER_PLUGIN", "").strip()
+    if plugin_spec:
+        plugin = load_callable_from_spec(plugin_spec)
+        out = plugin(model=model, api_key=api_key, api_base=api_base)
+        if isinstance(out, ResolveResult):
+            return out
+        if isinstance(out, tuple) and len(out) >= 2:
+            resolved_model = str(out[0])
+            adapter = out[1]
+            provider_note = str(out[2]) if len(out) > 2 and out[2] is not None else None
+            return ResolveResult(resolved_model=resolved_model, adapter=adapter, provider_note=provider_note)
+        raise ValueError("Model resolver plugin must return ResolveResult or tuple(resolved_model, adapter[, provider_note]).")
+
     resolved_key = api_key
     resolved_base = api_base or os.getenv("LLM_BASE_URL")
     resolved_model = model
@@ -94,4 +108,3 @@ def resolve_model_and_adapter(
         extra_headers=extra_headers,
     )
     return ResolveResult(resolved_model=resolved_model, adapter=adapter, provider_note=provider_note)
-

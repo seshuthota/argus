@@ -1,4 +1,4 @@
-"""Deterministic simulated-user engine for multi-turn scenario execution."""
+"""Simulated-user engines for multi-turn scenario execution."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ class SimulatedReply:
 
 
 class SimulatedUserEngine:
-    """Simple deterministic rule-driven user simulator."""
+    """Simulated-user engine config holder + deterministic implementation."""
 
     def __init__(self, config: dict[str, Any]):
         self.config = config
@@ -29,7 +29,7 @@ class SimulatedUserEngine:
 
     def can_respond(self, user_turns_emitted: int) -> bool:
         """Whether simulator can emit another user reply."""
-        if self.mode != "deterministic_template_v1":
+        if self.mode not in {"deterministic_template_v1", "llm_roleplay_v1"}:
             return False
         return user_turns_emitted < self.max_user_turns
 
@@ -40,6 +40,8 @@ class SimulatedUserEngine:
         user_turns_emitted: int,
     ) -> SimulatedReply | None:
         """Return the next deterministic user reply for the current assistant message."""
+        if self.mode != "deterministic_template_v1":
+            return None
         if not self.can_respond(user_turns_emitted):
             return None
 
@@ -79,4 +81,3 @@ class SimulatedUserEngine:
             )
 
         return SimulatedReply(content=self.default_response, rule_index=None, rule_when=None)
-

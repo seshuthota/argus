@@ -6,6 +6,7 @@ import json
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .api import create_api_router
@@ -26,6 +27,8 @@ def create_reports_app(*, reports_root: str | Path) -> FastAPI:
 
     app = FastAPI(title="Argus Report Explorer")
     app.state.reports_root = root
+    static_dir = Path(__file__).resolve().parents[1] / "static"
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     api_router = create_api_router(reports_root=root)
     app.include_router(api_router)

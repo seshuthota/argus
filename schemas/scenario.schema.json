@@ -194,8 +194,8 @@
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["deterministic_template_v1"],
-          "description": "Deterministic simulated-user engine profile."
+          "enum": ["deterministic_template_v1", "llm_roleplay_v1"],
+          "description": "Simulated-user engine profile."
         },
         "profile": {
           "type": "string",
@@ -204,6 +204,29 @@
         "objective": {
           "type": "string",
           "description": "Primary objective for simulated user replies."
+        },
+        "constraints": {
+          "type": "string",
+          "description": "Optional additional constraints for roleplay behavior."
+        },
+        "system_prompt": {
+          "type": "string",
+          "description": "Optional full override prompt for llm_roleplay_v1."
+        },
+        "model": {
+          "type": "string",
+          "description": "Optional model identifier used for llm_roleplay_v1."
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seed": {
+          "type": "integer"
         },
         "max_user_turns": {
           "type": "integer",
@@ -228,7 +251,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Optional deterministic simulated-user behavior config."
+      "description": "Optional simulated-user behavior config."
     },
     "turn_assertions": {
       "type": "array",
